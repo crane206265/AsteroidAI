@@ -13,7 +13,6 @@ class SphericalHarmonicsExpansion():
         self.LightCurve = LightCurve
         self.l_range = l_range
         self.coef_arr = np.zeros(((l_range+1)**2), dtype="complex_")
-        self.coef_arr = self.SHE_coef()
 
     def SHE_coef(self):
         """
@@ -51,21 +50,39 @@ class SphericalHarmonicsExpansion():
                     value = value + self.coef_arr[idx]*sph_harm_y(l, m, theta, phi, diff_n=diff_n)[diff_n]
         return value
 
-    def SHE_MSE(self):
+    def SHE_RMSE(self, relative=False, percent=False):
         Asteroid = self.Asteroid
 
-        mse = 0
+        #OLD VERSION RRMSE
+        """
+        rmse = 0
+        rms = 0
         for i in range(Asteroid.Ntheta):
             for j in range(Asteroid.Nphi):
-                mse += (np.real(self.SHE_r_func(i*Asteroid.dtheta, j*Asteroid.dphi)).astype(np.float64) - Asteroid.pos_sph_arr[j, i, 0])**2
-        mse = (mse/(Asteroid.Ntheta*Asteroid.Nphi))**0.5
-        print("SHE MSE :", mse)
+                rmse += (np.real(self.SHE_r_func(i*Asteroid.dtheta, j*Asteroid.dphi)).astype(np.float64) - Asteroid.pos_sph_arr[j, i, 0])**2
+                rms += Asteroid.pos_sph_arr[j, i, 0]**2
+        rmse = (rmse/(Asteroid.Ntheta*Asteroid.Nphi))**0.5
+        """
+
+        rmse = 0
+        for i in range(Asteroid.Ntheta):
+            for j in range(Asteroid.Nphi):
+                if relative:
+                    rmse += ((np.real(self.SHE_r_func(i*Asteroid.dtheta, j*Asteroid.dphi)).astype(np.float64) - Asteroid.pos_sph_arr[j, i, 0])/Asteroid.pos_sph_arr[j, i, 0])**2
+                else:
+                    rmse += (np.real(self.SHE_r_func(i*Asteroid.dtheta, j*Asteroid.dphi)).astype(np.float64) - Asteroid.pos_sph_arr[j, i, 0])**2
+        rmse = (rmse/(Asteroid.Ntheta*Asteroid.Nphi))**0.5
+
+        if percent:
+            rmse *= 100
+        print("SHE MSE :", rmse, end=' ')
+        print("(relative : "+str(relative)+")")
 
     def SHE_display(self, divN=(40, 40)):
         phi = np.linspace(0, 2*np.pi, divN[0])
         theta = np.linspace(0, np.pi, divN[1])
         phi, theta = np.meshgrid(phi, theta)
-        cart_coord = self.Asteroid.sph2cart(np.real(self.SHE_r_func(theta, phi)).astype(np.float64), phi, theta)
+        cart_coord = AsteroidModel.sph2cart(np.real(self.SHE_r_func(theta, phi)).astype(np.float64), phi, theta)
         gridX = cart_coord[0]
         gridY = cart_coord[1]
         gridZ = cart_coord[2]
@@ -109,7 +126,7 @@ class SphericalHarmonicsExpansion():
         phi = np.linspace(0, 2*np.pi, SHE_divN[0])
         theta = np.linspace(0, np.pi, SHE_divN[1])
         phi, theta = np.meshgrid(phi, theta)
-        cart_coord = self.Asteroid.sph2cart((np.real(self.SHE_r_func(theta, phi)).astype(np.float64), phi, theta))
+        cart_coord = AsteroidModel.sph2cart((np.real(self.SHE_r_func(theta, phi)).astype(np.float64), phi, theta))
         gridX = cart_coord[0]
         gridY = cart_coord[1]
         gridZ = cart_coord[2]
@@ -126,6 +143,7 @@ class SphericalHarmonicsExpansion():
         ax2.plot_surface(gridX, gridY, gridZ)
         
         plt.show()
+
 
     #SHE LC - Not Using
     """
@@ -185,6 +203,66 @@ class SphericalHarmonicsExpansion():
     """
 
 
+class SHEcoefDisplay():
+    def __init__(self, y0, pred, l_max=8):
+        self.y0 = np.array(y0)
+        self.pred = np.array(pred)
+        _ = 0 # trash value
+        self.y0_SHE = SphericalHarmonicsExpansion(_, _, l_range=l_max)
+        self.pred_SHE = SphericalHarmonicsExpansion(_, _, l_range=l_max)
+        self.y0_SHE.coef_arr = self.y0
+        self.pred_SHE.coef_arr = self.pred
+        self.SHE_divN = (40, 20)
+        self.coef_arr_display()
+
+    def coef_arr_display(self):
+        """
+        SHE display function for pred / y0 coef arr
+        """
+        fig = plt.figure(figsize=(10, 5))
+        ax1 = fig.add_subplot(1, 2, 1, projection='3d')
+        ax2 = fig.add_subplot(1, 2, 2, projection='3d')
+        
+        lim_set = (-400, 400)
+        phi = np.linspace(0, 2*np.pi, self.SHE_divN[0])
+        theta = np.linspace(0, np.pi, self.SHE_divN[1])
+        phi, theta = np.meshgrid(phi, theta)
+
+        y0_cart_coord = AsteroidModel.sph2cart((np.real(self.y0_SHE.SHE_r_func(theta, phi)).astype(np.float64), phi, theta))
+        y0_gridX = y0_cart_coord[0]
+        y0_gridY = y0_cart_coord[1]
+        y0_gridZ = y0_cart_coord[2]
+        
+        ax1.set_box_aspect((1, 1, 1))
+        ax1.set_xlim(lim_set)
+        ax1.set_xlabel('X')
+        ax1.set_ylim(lim_set)
+        ax1.set_ylabel('Y')
+        ax1.set_zlim(lim_set)
+        ax1.set_zlabel('Z')
+        ax1.set_title("Correct Model - Spherical Hamonics Expansion")
+
+        ax1.plot_surface(y0_gridX, y0_gridY, y0_gridZ)
+
+        pred_cart_coord = AsteroidModel.sph2cart((np.real(self.pred_SHE.SHE_r_func(theta, phi)).astype(np.float64), phi, theta))
+        pred_gridX = pred_cart_coord[0]
+        pred_gridY = pred_cart_coord[1]
+        pred_gridZ = pred_cart_coord[2]
+        
+        ax2.set_box_aspect((1, 1, 1))
+        ax2.set_xlim(lim_set)
+        ax2.set_xlabel('X')
+        ax2.set_ylim(lim_set)
+        ax2.set_ylabel('Y')
+        ax2.set_zlim(lim_set)
+        ax2.set_zlabel('Z')
+        ax2.set_title("Predicted Model - Spherical Hamonics Expansion")
+
+        ax2.plot_surface(pred_gridX, pred_gridY, pred_gridZ)
+        
+        plt.show()
+
+
 """
 np.random.seed(1)
 test_ast = AsteroidModel(axes=(7, 4, 5), N_set=(40, 20), tilt_mode="random") #745
@@ -202,8 +280,10 @@ test_lc.lc_gen(100, 1) #use lc_gen before use rotate_anim
 test_lc.rotate_anim(100, 1)
 
 test_SHE = SphericalHarmonicsExpansion(Asteroid=test_ast, LightCurve=test_lc, l_range=8)
+test_SHE.coef_arr = test_SHE.SHE_coef()
 test_SHE.Ast_SHE_display()
-test_SHE.SHE_MSE()
+test_SHE.SHE_RMSE(relative=True)
+print(test_SHE.coef_arr)
 
 #test_SHE.lc_gen_SHE(100, 1)
 #test_SHE.lc_SHE_display(100, 1)

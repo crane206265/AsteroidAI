@@ -202,7 +202,7 @@ class LightCurve():
         for i in range(self.Asteroid.Nphi+1):
             for j in range(self.Asteroid.Ntheta+1):
                 pos_cart_temp = R_eps.T@self.rotArr(self.rot_angle_list[frame], "z")@R_eps@self.Asteroid.pos_cart_arr[i, j]
-                pos_sph_temp = self.Asteroid.cart2sph(pos_cart_temp)
+                pos_sph_temp = AsteroidModel.cart2sph(pos_cart_temp)
                 gridX[i, j] = pos_cart_temp[0]
                 gridY[i, j] = pos_cart_temp[1]
                 gridZ[i, j] = pos_cart_temp[2]

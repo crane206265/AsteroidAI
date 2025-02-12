@@ -8,7 +8,7 @@ from LightCurve_Generator import LightCurve
 from SphericalHarmonicsExpansion import SphericalHarmonicsExpansion as SHE
 
 #DATA GEN
-def data_gen(file_num, ast_num = 50, lc_num = 10, lc_len = 200, coef_l = 8, N = (40, 20)):
+def data_gen(file_num, ast_num = 50, lc_num = 10, lc_len = 200, coef_l = 8, N = (40, 20), transfer = False):
 
     lc_arr = np.zeros((ast_num, lc_num, lc_len))
     lc_info = np.zeros((ast_num, lc_num, 2, 3))
@@ -20,18 +20,27 @@ def data_gen(file_num, ast_num = 50, lc_num = 10, lc_len = 200, coef_l = 8, N = 
     print("Save Path : \".../asteroid_AI/data/\"")
     for i in tqdm(range(ast_num*lc_num)):
         if i%ast_num == 0: 
-            while(True):
+            if transfer:
                 rand_radi = tuple(4*np.random.rand(3)+4)
                 ast_temp = AsteroidModel(axes=rand_radi, N_set=N, tilt_mode="random")
                 ast_temp.base_fitting_generator()
-                ast_temp.cut_ast(20, 0)
                 ast_temp.surf_vec_cal()
                 lc_temp = LightCurve(Asteroid=ast_temp, Keplerian_elem=(3, 0, 2*np.pi*np.random.rand(1)[0], np.pi*np.random.rand(1)[0]/6, 2*np.pi*np.random.rand(1)[0]), 
                                     eps=(0, 0), principle_axis=True)
-                #No need to COM correction : not highly cut asteroid
-                if ast_temp.COM_vec[0] < 0.5 and ast_temp.COM_vec[1] < 0.5 and ast_temp.COM_vec[2] < 0.5:
-                    break
+            else:
+                while(True):
+                    rand_radi = tuple(4*np.random.rand(3)+4)
+                    ast_temp = AsteroidModel(axes=rand_radi, N_set=N, tilt_mode="random")
+                    ast_temp.base_fitting_generator()
+                    ast_temp.cut_ast(20, 0)
+                    ast_temp.surf_vec_cal()
+                    lc_temp = LightCurve(Asteroid=ast_temp, Keplerian_elem=(3, 0, 2*np.pi*np.random.rand(1)[0], np.pi*np.random.rand(1)[0]/6, 2*np.pi*np.random.rand(1)[0]), 
+                                        eps=(0, 0), principle_axis=True)
+                    #No need to COM correction : not highly cut asteroid
+                    if ast_temp.COM_vec[0] < 0.5 and ast_temp.COM_vec[1] < 0.5 and ast_temp.COM_vec[2] < 0.5:
+                        break
             SHE_temp = SHE(Asteroid=ast_temp, LightCurve=lc_temp, l_range=coef_l)
+            SHE_temp.coef_arr = SHE_temp.SHE_coef()
 
         coef_arr[i//lc_num] = SHE_temp.coef_arr
         rot_axis[i//lc_num] = lc_temp.initial_w0/LA.norm(lc_temp.initial_w0)
@@ -47,8 +56,12 @@ def data_gen(file_num, ast_num = 50, lc_num = 10, lc_len = 200, coef_l = 8, N = 
         lc_info[i//lc_num, i%lc_num, 1] = lc_temp.rotArr(-lc_temp.ecl_O[0], "z")@lc_temp.rotArr(-lc_temp.ecl_O[1], "y")@np.array([1, 0, 0]).T #earth direction
         lc_arr[i//lc_num, i%lc_num] = lc_temp.lc_arr
 
-    np.savez("C:/Users/dlgkr/OneDrive/Desktop/code/astronomy/asteroid_AI/data/data_"+str(file_num)+".npz",
-            lc_arr=lc_arr, lc_info=lc_info, coef_arr=coef_arr, rot_axis=rot_axis)
+    if not transfer:
+        np.savez("C:/Users/dlgkr/OneDrive/Desktop/code/astronomy/asteroid_AI/data/data_"+str(file_num)+".npz",
+                lc_arr=lc_arr, lc_info=lc_info, coef_arr=coef_arr, rot_axis=rot_axis)
+    else:
+        np.savez("C:/Users/dlgkr/OneDrive/Desktop/code/astronomy/asteroid_AI/data/transfer_data/transfer_data_"+str(file_num)+".npz",
+                lc_arr=lc_arr, lc_info=lc_info, coef_arr=coef_arr, rot_axis=rot_axis)
     
 def data_concatenate(lc_num = 10):
     """
@@ -84,7 +97,8 @@ def data_concatenate(lc_num = 10):
         Y_total = np.repeat(Y_total, lc_num, axis=0)
     
 
-    for file_name in file_list:
+    print("CONCATENATING FILES...")
+    for file_name in tqdm(file_list):
         file_temp = np.load(folder_path+file_name)
 
         shape_temp = file_temp['lc_info'].shape
@@ -104,10 +118,15 @@ def data_concatenate(lc_num = 10):
     np.savez("C:/Users/dlgkr/OneDrive/Desktop/code/astronomy/asteroid_AI/data/data_total.npz", X_total=X_total, Y_total=Y_total)
 
 
-start_file_num = 13
-end_file_num = 20
+start_file_num = 303 #normal
+end_file_num = 500 #normal
+
+transfer = True
+start_file_num = 57 #transfer
+end_file_num = 200 #transfer
+
 for file_num in range(start_file_num, end_file_num+1):
-    #data_gen(file_num)
+    data_gen(file_num, transfer=transfer)
     continue
 
-data_concatenate()
+#data_concatenate()

@@ -63,7 +63,8 @@ class AsteroidModel():
         return arr
 
     # necessary calclutating functions
-    def sph2cart(self, sph_coord):
+    @staticmethod
+    def sph2cart(sph_coord):
         """
         spherical coord -> cartesian coord
         input : sph_coord = (r, phi, theta)
@@ -77,7 +78,8 @@ class AsteroidModel():
         z = r*np.cos(theta)
         return np.array([x, y, z])
     
-    def cart2sph(self, cart_coord):
+    @staticmethod
+    def cart2sph(cart_coord):
         """
         cartesian coord -> spherical coord
         input : cart_coord = (x, y, z)
@@ -165,6 +167,7 @@ class AsteroidModel():
         # valid region (discrete coord)
         self.valid_lw_bd, _, _ = self.coord2discr((-self.max_r, 0, 0), self.discr_param)
         self.valid_up_bd, _, _ = self.coord2discr((self.max_r, 0, 0), self.discr_param)
+        
 
     def __ellipsoid_frame(self, direction, radi=[-1, -1, -1], tilt_angle=[-1, -1]):
         """
@@ -280,7 +283,7 @@ class AsteroidModel():
         for i in range(self.Nphi):
             for j in range(self.Ntheta+1):
                 self.pos_sph_arr[i, j, 0] += self.pos_sph_arr[i, j, 0]*np.random.randn()*ratio
-                self.pos_cart_arr[i, j] = self.sph2cart(self.pos_sph_arr[i, j])
+                self.pos_cart_arr[i, j] = AsteroidModel.sph2cart(self.pos_sph_arr[i, j])
         self.__circular('all')
         self.wobble_r(epoch-1, ratio)
     
@@ -303,7 +306,7 @@ class AsteroidModel():
                 for j in range(self.Ntheta+1):
                     if sph_temp.f(self.pos_cart_arr[i, j]) < 0:
                         self.pos_sph_arr[i, j, 0] = sph_temp.r_f(self.pos_sph_arr[i, j, 1:])
-                        self.pos_cart_arr[i, j] = self.sph2cart(self.pos_sph_arr[i, j])
+                        self.pos_cart_arr[i, j] = AsteroidModel.sph2cart(self.pos_sph_arr[i, j])
             self.__is_interior_sph_cut(sph_temp)
 
     def __is_interior_sph_cut(self, sph_temp):
@@ -430,7 +433,7 @@ class AsteroidModel():
         for i in range(self.Nphi+1):
             for j in range(self.Ntheta+1):
                 pos_rot_temp = self.pos_sph_arr[i, j] + np.array([0, 2*np.pi*frame/rot_div_N, 0])
-                pos_cart_temp = self.sph2cart(pos_rot_temp)
+                pos_cart_temp = AsteroidModel.sph2cart(pos_rot_temp)
                 gridX[i, j] = pos_cart_temp[0]
                 gridY[i, j] = pos_cart_temp[1]
                 gridZ[i, j] = pos_cart_temp[2]
@@ -517,8 +520,8 @@ class AsteroidModel():
             for y_idx in range(self.is_interior.shape[1]):
                 for z_idx in range(self.is_interior.shape[2]):
                     x, y, z = self.__is_interior_transform_arr2coord((x_idx, y_idx, z_idx), self.is_interior_param)
-                    phi = self.cart2sph((x, y, z))[1]
-                    theta = self.cart2sph((x, y, z))[2]
+                    phi = AsteroidModel.cart2sph((x, y, z))[1]
+                    theta = AsteroidModel.cart2sph((x, y, z))[2]
                     j = int(theta/self.dtheta)
                     i = int((phi - (j%2)*self.dphi/2)/self.dphi)
                     interior = False
