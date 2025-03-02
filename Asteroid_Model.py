@@ -8,7 +8,7 @@ from Model_Cutter import CutterSphere
 
 
 class AsteroidModel():
-    def __init__(self, axes, N_set, tilt_mode="assigned", tilt=(0, 0), coord2discrete_param=(0.5, 10)):
+    def __init__(self, axes, N_set, tilt_mode="assigned", tilt=(0, 0), coord2discrete_param=(0.5, 10), interior_cal=True):
         self.Nphi = N_set[0]
         self.Ntheta = N_set[1]
         self.dphi = 2*np.pi/self.Nphi
@@ -30,7 +30,7 @@ class AsteroidModel():
             raise ValueError("Unimplemented tilt_mode")
         
         self.discr_param = coord2discrete_param
-
+        self.interior_cal = interior_cal
 
 
         prec, bound = self.discr_param
@@ -90,13 +90,8 @@ class AsteroidModel():
         z = cart_coord[2]
         r = LA.norm(np.array([x, y, z]))
         phi = np.arctan2(y, x)
-        if LA.norm(np.array([x, y])) == 0:
-            if z >= 0:
-                theta = np.pi/2
-            else:
-                theta = -np.pi/2
-        else:
-            theta = np.arctan(z/((x*x + y*y)**0.5))
+        theta = np.arccos(z/r)
+
         return np.array([r, phi, theta])
 
 
@@ -143,7 +138,8 @@ class AsteroidModel():
     def base_fitting_generator(self, mode="ellipsoid"):
         if mode == "ellipsoid":
             generating_frame = self.__ellipsoid_frame 
-            self.__ellipsoid_is_interior()
+            if self.interior_cal:
+                self.__ellipsoid_is_interior()
 
         for i in range(self.Nphi):
             for j in range(self.Ntheta+1):
@@ -287,27 +283,29 @@ class AsteroidModel():
         self.__circular('all')
         self.wobble_r(epoch-1, ratio)
     
-    def cut_ast(self, sph_num, pla_num):
+    def cut_ast(self, sph_num, pla_num, assigned=False, mode='Rxyz_assign', **kwargs):
         """
         cut asteroid with specific shape
 
         sph_num : cutting spherical num
         pla_num : cutting plane num
         """
-        self.__sph_cut(sph_num)
+        pos_sph = kwargs['pos_sph']
+        self.__sph_cut(sph_num, assigned=not(assigned), mode=mode, pos_sph=pos_sph)
 
-    def __sph_cut(self, sph_num):
+    def __sph_cut(self, sph_num, **kwargs):
         """
         cutting with sphere - CutterSphere#class
         """
         for k in range(sph_num):
-            sph_temp = CutterSphere(ast = self, random=True)
+            sph_temp = CutterSphere(self, kwargs['assigned'], kwargs['mode'], kwargs['pos_sph'][0], kwargs['pos_sph'][1], kwargs['pos_sph'][2], kwargs['pos_sph'][3])
             for i in range(self.Nphi+1):
                 for j in range(self.Ntheta+1):
                     if sph_temp.f(self.pos_cart_arr[i, j]) < 0:
                         self.pos_sph_arr[i, j, 0] = sph_temp.r_f(self.pos_sph_arr[i, j, 1:])
                         self.pos_cart_arr[i, j] = AsteroidModel.sph2cart(self.pos_sph_arr[i, j])
-            self.__is_interior_sph_cut(sph_temp)
+            if self.interior_cal:
+                self.__is_interior_sph_cut(sph_temp)
 
     def __is_interior_sph_cut(self, sph_temp):
         #print("UPDATING [is_interior] MATRIX : for sphere cut")
