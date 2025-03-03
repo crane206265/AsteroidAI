@@ -170,13 +170,16 @@ class Runner():
         self.env = env
         self.state = None
         self.done = True
+        self.passed = False
+        self.all_done = False
         self.steps = 0
         self.episode_reward = 0
         self.episode_rewards = []
 
-    def reset(self):
+    def reset(self, passed):
         self.episode_reward = 0
         self.done = False
+        self.passed = False
         self.state = self.env.reset()
 
     def run(self, max_steps, memory=None):
@@ -186,15 +189,21 @@ class Runner():
         if not memory: memory = []
 
         for k in range(max_steps):
-            if self.done: self.reset()
+            if self.all_done:
+                print(" SUCCESSED in CURRENT ENV")
+                print(" episode:", len(self.episode_rewards), ", episode reward:", self.episode_reward)
+                break
+
+            if self.done:
+                self.reset(self.passed)
 
             dists = actor(t(self.state))
             actions = dists.sample().detach().data.numpy()
             actions_clipped = np.clip(actions, action_space_low, action_space_high)
 
-            next_state, reward, self.done = self.env.step(actions_clipped)
-            #print(actions_clipped)
-            #print(self.done)
+            next_state, reward, self.done, info = self.env.step(actions_clipped)
+            self.passed = info[0]
+            self.all_done = info[1]
             memory.append((actions, reward, self.state, next_state, self.done))
 
             self.state = next_state
@@ -220,15 +229,15 @@ data_path = "C:/Users/dlgkr/OneDrive/Desktop/code/astronomy/asteroid_AI/data/dat
 dataPP = DataPreProcessing(data_path=data_path)
 dataPP.Y_total = dataPP.Y_total[:, 0:(l_max+1)**2]
 dataPP.coef2R(dataPP.Y_total, l_max=l_max, N_set=N_set)
-dataPP.merge(merge_num=merge_num, ast_repeat_num=10, lc_len=lightcurve_unit_len, dupl_ratio=0.02)
+dataPP.merge(merge_num=merge_num, ast_repeat_num=10, lc_len=lightcurve_unit_len, dupl_ratio=0.01)
 dataPP.X_total = dataPP.X_total.numpy()
 dataPP.Y_total = dataPP.Y_total.numpy()
-X_total, _, y_total, _ = dataPP.train_test_split(trainset_ratio=0.3)
+X_total, _, y_total, _ = dataPP.train_test_split(trainset_ratio=0.1)
 
 for i in tqdm(range(X_total.shape[0])):
-    obs_lc_num = np.random.randint(merge_num)
-    obs_lc_time = np.argmax(X_total[i, lightcurve_unit_len*(obs_lc_num):lightcurve_unit_len*(obs_lc_num+1)])
-    env = AstEnv(X_total[i, :-9*merge_num], X_total[i, -9*merge_num:], merge_num, (obs_lc_num, obs_lc_time), N_set, lightcurve_unit_len)
+    #obs_lc_num = np.random.randint(merge_num)
+    #obs_lc_time = np.argmax(X_total[i, lightcurve_unit_len*(obs_lc_num):lightcurve_unit_len*(obs_lc_num+1)])
+    env = AstEnv(X_total[i, :-9*merge_num], X_total[i, -9*merge_num:], merge_num, N_set, lightcurve_unit_len)
     state_dim = (env.Ntheta*env.Nphi)//(2*env.ast_obs_unit_step) + 2*(lightcurve_unit_len//(4*env.lc_obs_unit_step))
     n_actions = 4
 
@@ -241,17 +250,13 @@ for i in tqdm(range(X_total.shape[0])):
     learner = A2CLearner(actor, critic)
     runner = Runner(env)
 
-    steps_on_memory = 10
+    steps_on_memory = 50
     #episodes = 5
     #episode_length = 20
-    ep_product = 10
+    ep_product = 50
     #total_steps = (episode_length*episodes)//steps_on_memory
     total_steps = ep_product//steps_on_memory
 
     for j in range(total_steps):
         memory = runner.run(steps_on_memory)
         learner.learn(memory, runner.steps, discount_rewards=False)
-
-    
-
-    
