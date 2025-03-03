@@ -10,7 +10,7 @@ PI = 3.1415926535
 
 
 class AstEnv():
-    def __init__(self, target_lc, lc_info, lc_num, obs_set, N_set=(40, 20), lc_unit_len=200, batch_size=64):
+    def __init__(self, target_lc, lc_info, lc_num, N_set=(40, 20), lc_unit_len=200):
         """
         target_lc
         lc_info : [sun_dir, earth_dir, rot_axis]
@@ -29,21 +29,28 @@ class AstEnv():
         initial_eps[1] = np.arccos(self.rot_axis[2]/LA.norm(self.rot_axis))
         self.R_eps = AsteroidModel.rotArr(initial_eps[0], "z")@AsteroidModel.rotArr(initial_eps[1], "y")
 
-        self.obs_lc_num = obs_set[0]
-        self.obs_time = obs_set[1]
+        self.__set_obs_params()
+        """
+        self.obs_lc_num = np.random.randint(lc_num)
+        self.obs_time = np.argmax(target_lc[lc_unit_len*(self.obs_lc_num):lc_unit_len*(self.obs_lc_num+1)])
         self.obs_lc_full = self.target_lc[self.lc_unit_len*(self.obs_lc_num):self.lc_unit_len*(self.obs_lc_num+1)]
         self.obs_lc_info = lc_info[9*(self.obs_lc_num):9*(self.obs_lc_num+1)]
         self.obs_phi, self.obs_theta = self.__obs_dir_cal()
+        """
 
         self.ast_obs_unit_step = 4
         self.lc_obs_unit_step = 4
 
         self.Nphi, self.Ntheta = N_set[0], N_set[1]
         self.dphi, self.dtheta = 2*PI/self.Nphi, PI/self.Ntheta
-        self.reward_threshold = 95
+        self.reward_threshold = 90
+        self.total_threshold = 90
 
         # Initialize asteroid
+        self.lc_pred = np.zeros(self.lc_unit_len*self.lc_num)
+        self.ast_backup = None
         self.reset()
+        self.ast_backup = self.ast.copy()
         """
         self.__ellipsoid()
         self.ast = AsteroidModel(axes=self.R_set, N_set=N_set, tilt_mode="assigned", tilt=self.tilt, interior_cal=False)
@@ -113,14 +120,18 @@ class AstEnv():
         if mode == 'ratio_assign'
             action = [phi, theta, r_cen_ratio, R_cut_ratio]
         """
-        terminated = False
+        done = False
+        all_done = False
+        passed = False
         if mode == 'ratio_assign':
             phi_action = (self.obs_phi/(2*PI) + action[0])%1 # action be a relative ratio from obs_phi
             theta_action = (self.obs_theta/PI + action[1])%1 # action be a relative ratio from obs_theta
             self.ast.cut_ast(1, 0, True, pos_sph=(phi_action, theta_action, action[2], action[3]))
-        else:
+        elif mode == 'coord_assign':
             cut_sph_pos = AsteroidModel.sph2cart((action[1], action[2], action[3]))
             self.ast.cut_ast(1, 0, True, pos_sph=(action[0], cut_sph_pos[0], cut_sph_pos[1], cut_sph_pos[2]))
+        else:
+            raise NotImplementedError
 
         # Maintaining the mean of asteroid r_arr
         mean0 = 7
@@ -133,13 +144,16 @@ class AstEnv():
         reward = self.reward(init=100.0, rooted=False)
         #print(reward, "REWARD")
         if reward > self.reward_threshold:
-            terminated = True
+            done = True
+            passed = True
+            all_done = self.__test__all()
         elif reward <= 20:
-            terminated = True
+            done = True
+            passed = False
 
         observation = self.obs()
 
-        return observation, reward, terminated
+        return observation, reward, done, (passed, all_done)
 
     def reward(self, init=100, rooted=False, include_other=False):
         reward = init
@@ -155,22 +169,33 @@ class AstEnv():
             
             loss = np.mean((target_lc_temp - lc_temp)**2)
             if rooted:
-                loss = np.sqrt(loss)
+                loss = np.sqrt(loss+1e-15)
             reward = reward - loss
         
         return reward
     
     def reset(self):
-        self.__ellipsoid()
-        self.ast = AsteroidModel(axes=self.R_set, N_set=(self.Nphi, self.Ntheta), tilt_mode="assigned", tilt=self.tilt, interior_cal=False)
-        self.ast.base_fitting_generator(mode="ellipsoid")
+        if self.ast_backup == None:
+            self.__ellipsoid()
+            self.ast = AsteroidModel(axes=self.R_set, N_set=(self.Nphi, self.Ntheta), tilt_mode="assigned", tilt=self.tilt, interior_cal=False)
+            self.ast.base_fitting_generator(mode="ellipsoid")
+        else:
+            #if not passed:
+            #    self.ast = self.ast_backup.copy()
+            self.__set_obs_params()
 
-        self.lc_pred = np.zeros(self.lc_unit_len*self.lc_num)
-        self.step((0, 100, 0, 0)) #initialize lc_pred
+        self.step((0, 100, 0, 0)) #initialize/recalculate lc_pred
 
         return self.obs()
+    
+    def __set_obs_params(self):
+        self.obs_lc_num = np.random.randint(self.lc_num)
+        self.obs_time = np.argmax(self.target_lc[self.lc_unit_len*(self.obs_lc_num):self.lc_unit_len*(self.obs_lc_num+1)])
+        self.obs_lc_full = self.target_lc[self.lc_unit_len*(self.obs_lc_num):self.lc_unit_len*(self.obs_lc_num+1)]
+        self.obs_lc_info = self.lc_info[9*(self.obs_lc_num):9*(self.obs_lc_num+1)]
+        self.obs_phi, self.obs_theta = self.__obs_dir_cal()
 
-    def __lc_gen(self, lc_info, flux0=10):
+    def __lc_gen(self, lc_info, flux0=100):
         Sdir = lc_info[0:3]
         Edir = lc_info[3:6]
         #rot_axis = lc_info[6:9]
@@ -186,6 +211,13 @@ class AstEnv():
         generated_lc = flux0 * generated_lc
 
         return generated_lc
+    
+    def __test__all(self):
+        reward_total = self.reward(include_other=True)
+        if reward_total > self.total_threshold:
+            return True
+        else:
+            return False
 
     @staticmethod
     def __ReLU(x):
@@ -247,12 +279,12 @@ dataPP.X_total = dataPP.X_total.numpy()
 dataPP.Y_total = dataPP.Y_total.numpy()
 
 
-test = AstEnv(dataPP.X_total[0, :-9*merge_num], dataPP.X_total[0, -9*merge_num:], merge_num, (0, 20), N_set)
+test = AstEnv(dataPP.X_total[0, :-9*merge_num], dataPP.X_total[0, -9*merge_num:], merge_num, N_set, lightcurve_unit_len)
 test.show()
 print(test.obs())
-test.step((5, 8, 0, 0))
+test.step((5, 8, 0, 0), mode='coord_assign')
 #print(test.lc_pred)
 print(test.obs())
 test.show()
 #print(test.lc_pred)
-'''
+#'''
