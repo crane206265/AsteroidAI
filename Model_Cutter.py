@@ -1,6 +1,24 @@
 import numpy as np
 from numpy import linalg as LA
 
+
+class CutterPlane():
+    def __init__(self, ast, random = True, mode = 'angle_assign', **kwargs):
+        self.phi = kwargs['phi']
+        self.theta = kwargs['theta']
+        self.dist = kwargs['distance'] #distance from ast_r
+        self.ast = ast
+
+        self.j_cen = round(self.theta_cen/ast.dtheta)
+        if self.j_cen%2 == 0:
+            self.i_cen = round(self.phi_cen/ast.dphi)
+        else:
+            self.i_cen = round((self.phi_cen-ast.dphi/2)/ast.dphi)
+        self.r_ast = ast.pos_sph_arr[self.i_cen, self.j_cen, 0]
+
+    
+
+
 class CutterSphere():
     def __init__(self, ast, random = True, mode = 'Rxyz_assign', *args):
         """
@@ -11,9 +29,9 @@ class CutterSphere():
             if mode == 'ratio_assign' *args = (phi, theta, r_cen_ratio, r_cut_ratio)
         ast : Asteroid_Model#class
         """
-        self.k = 0.2 #cut ratio 0.2
-        self.min_cen = 3 #3
-        self.max_cen = 10
+        self.k = 0.1 #cut ratio 0.2
+        self.min_cen = 8 #3 - for generating asteroid
+        self.max_cen = 13 #10
 
         if random == False and mode == 'Rxyz_assign':
             self.radi = args[0]
