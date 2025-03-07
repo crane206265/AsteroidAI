@@ -21,6 +21,7 @@ from tqdm import tqdm
 from Environment import AstEnv
 from DataPreprocessing import DataPreProcessing
 
+
 def mish(input):
     return input * torch.tanh(F.softplus(input))
 
@@ -170,88 +171,117 @@ class Runner():
         self.env = env
         self.state = None
         self.done = True
+        self.passed = False
+        self.all_done = False
         self.steps = 0
         self.episode_reward = 0
         self.episode_rewards = []
 
-    def reset(self):
+    def reset(self, passed):
         self.episode_reward = 0
         self.done = False
-        self.state = self.env.reset()
+        self.passed = False
+        self.state = self.env.reset(passed)
 
-    def run(self, max_steps, memory=None):
-        action_space_low = 0
-        action_space_high = 1
+    def run(self, max_steps, data_num, et, memory=None):
+        action_space_low = 0.01
+        action_space_high = 0.25 #0.15
 
         if not memory: memory = []
 
+        max_reward = -9e+8
+        show_bool = True
         for k in range(max_steps):
-            if self.done: self.reset()
+            if self.all_done:
+                print(" SUCCESSED in CURRENT ENV")
+                print(" episode:", len(self.episode_rewards), ", episode reward:", self.episode_reward)
+                self.env.show()
+                break
+
+            if self.done:
+                self.reset(self.passed)
 
             dists = actor(t(self.state))
             actions = dists.sample().detach().data.numpy()
-            actions_clipped = np.clip(actions, action_space_low, action_space_high)
+            actions_clipped = np.clip(actions, [0, 0, 0, action_space_low], [1, 1, 1, action_space_high])
 
-            next_state, reward, self.done = self.env.step(actions_clipped)
-            #print(actions_clipped)
-            #print(self.done)
+            next_state, reward, self.done, info = self.env.step(actions_clipped)
+            self.passed = info[0]
+            self.all_done = info[1]
             memory.append((actions, reward, self.state, next_state, self.done))
 
             self.state = next_state
             self.steps += 1
-            self.episode_reward += reward
+            #self.episode_reward += reward
+            #self.episode_reward += (reward - 80 - k*2)
+            self.episode_reward = reward
+
+            max_reward = max(max_reward, reward)
+            if k%4 == 0:
+                print("Reward :", max_reward)
+                max_reward = -9e+8
+                show_bool = True
+
+            if reward > 45 and show_bool:
+                print("show_passed : "+str(reward)+" | obs_lc_num : "+str(self.env.obs_lc_num))
+                self.env.show(str(data_num)+"_"+str(et)+"_"+str(k)+"_"+str(int(reward*100)/100)+"_"+"0306ast.png")
+                plt.close()
+                show_bool = False
 
             if self.done:
+                #print(actions_clipped)
+                if self.passed:
+                    print("show_passed : "+str(reward)+" | obs_lc_num : "+str(self.env.obs_lc_num))
+                    self.env.show()
+                    plt.close()    
                 self.episode_rewards.append(self.episode_reward)
                 if len(self.episode_rewards) % 10 == 0:
                     print(" episode:", len(self.episode_rewards), ", episode reward:", self.episode_reward)
                 #writer.add_scalar("episode_reward", self.episode_reward, global_step=self.steps)
 
-        return memory
+        return memory, reward
 
 
 
 l_max = 8
 merge_num = 3
 N_set = (40, 20)
-lightcurve_unit_len = 200
+lightcurve_unit_len = 100
 data_path = "C:/Users/dlgkr/OneDrive/Desktop/code/astronomy/asteroid_AI/data/data_total.npz"
 
 dataPP = DataPreProcessing(data_path=data_path)
+dataPP.X_total = torch.concat((dataPP.X_total[:, :100], dataPP.X_total[:, -9:]), dim=-1)
 dataPP.Y_total = dataPP.Y_total[:, 0:(l_max+1)**2]
 dataPP.coef2R(dataPP.Y_total, l_max=l_max, N_set=N_set)
-dataPP.merge(merge_num=merge_num, ast_repeat_num=10, lc_len=lightcurve_unit_len, dupl_ratio=0.02)
+dataPP.merge(merge_num=merge_num, ast_repeat_num=10, lc_len=lightcurve_unit_len, dupl_ratio=0.01)
 dataPP.X_total = dataPP.X_total.numpy()
 dataPP.Y_total = dataPP.Y_total.numpy()
-X_total, _, y_total, _ = dataPP.train_test_split(trainset_ratio=0.3)
+X_total, _, y_total, _ = dataPP.train_test_split(trainset_ratio=0.1)
 
 for i in tqdm(range(X_total.shape[0])):
-    obs_lc_num = np.random.randint(merge_num)
-    obs_lc_time = np.argmax(X_total[i, lightcurve_unit_len*(obs_lc_num):lightcurve_unit_len*(obs_lc_num+1)])
-    env = AstEnv(X_total[i, :-9*merge_num], X_total[i, -9*merge_num:], merge_num, (obs_lc_num, obs_lc_time), N_set, lightcurve_unit_len)
+    #obs_lc_num = np.random.randint(merge_num)
+    #obs_lc_time = np.argmax(X_total[i, lightcurve_unit_len*(obs_lc_num):lightcurve_unit_len*(obs_lc_num+1)])
+    env = AstEnv(X_total[i, :-9*merge_num], X_total[i, -9*merge_num:], merge_num, N_set, lightcurve_unit_len)
+    if env.ell_err:
+        continue
     state_dim = (env.Ntheta*env.Nphi)//(2*env.ast_obs_unit_step) + 2*(lightcurve_unit_len//(4*env.lc_obs_unit_step))
     n_actions = 4
 
     #writer = SummaryWriter("runs/mish_activation")
 
     # config
-    actor = Actor(state_dim, n_actions, activation=Mish)
-    critic = Critic(state_dim, activation=Mish)
+    actor = Actor(state_dim, n_actions, activation=nn.Tanh)
+    critic = Critic(state_dim, activation=nn.Tanh)
 
     learner = A2CLearner(actor, critic)
     runner = Runner(env)
 
-    steps_on_memory = 10
-    #episodes = 5
-    #episode_length = 20
-    ep_product = 10
-    #total_steps = (episode_length*episodes)//steps_on_memory
-    total_steps = ep_product//steps_on_memory
+    steps_on_memory = 50 
+    total_steps = 5
 
     for j in range(total_steps):
-        memory = runner.run(steps_on_memory)
-        learner.learn(memory, runner.steps, discount_rewards=False)
-
-    
-
+        memory, last_reward = runner.run(steps_on_memory, i, j)
+        learner.learn(memory, runner.steps, discount_rewards=True)
+        if last_reward < -2e+2:
+            break
     
