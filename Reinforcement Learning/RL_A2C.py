@@ -123,7 +123,7 @@ class A2CLearner():
     def learn(self, memory, steps, discount_rewards=True):
         actions, rewards, states, next_states, dones = process_memory(memory, self.gamma, discount_rewards)
 
-        if discount_rewards:
+        if not discount_rewards:
             td_target = rewards
         else:
             td_target = rewards + self.gamma*critic(next_states)*(1-dones)
@@ -183,9 +183,12 @@ class Runner():
         self.passed = False
         self.state = self.env.reset(passed)
 
-    def run(self, max_steps, data_num, et, memory=None):
+    def run(self, max_steps, data_num, et, reward_lists, memory=None):
+        reward_list = reward_lists[0]
+        max_reward_list = reward_lists[1]
+
         action_space_low = 0.01
-        action_space_high = 0.25 #0.15
+        action_space_high = 0.2 #0.15
 
         if not memory: memory = []
 
@@ -233,13 +236,16 @@ class Runner():
                 if self.passed:
                     print("show_passed : "+str(reward)+" | obs_lc_num : "+str(self.env.obs_lc_num))
                     self.env.show()
-                    plt.close()    
+                    plt.close()
+                    break    
                 self.episode_rewards.append(self.episode_reward)
+                max_reward_list.append(max_reward)
                 if len(self.episode_rewards) % 10 == 0:
                     print(" episode:", len(self.episode_rewards), ", episode reward:", self.episode_reward)
                 #writer.add_scalar("episode_reward", self.episode_reward, global_step=self.steps)
 
-        return memory, reward
+        reward_list = reward_list + self.episode_rewards
+        return memory, reward, (reward_list, max_reward_list)
 
 
 
@@ -248,6 +254,7 @@ merge_num = 3
 N_set = (40, 20)
 lightcurve_unit_len = 100
 data_path = "C:/Users/dlgkr/OneDrive/Desktop/code/astronomy/asteroid_AI/data/data_total.npz"
+model_save_path = "C:/Users/dlgkr/OneDrive/Desktop/code/astronomy/asteroid_AI/checkpoints/"
 
 dataPP = DataPreProcessing(data_path=data_path)
 dataPP.X_total = torch.concat((dataPP.X_total[:, :100], dataPP.X_total[:, -9:]), dim=-1)
@@ -257,6 +264,14 @@ dataPP.merge(merge_num=merge_num, ast_repeat_num=10, lc_len=lightcurve_unit_len,
 dataPP.X_total = dataPP.X_total.numpy()
 dataPP.Y_total = dataPP.Y_total.numpy()
 X_total, _, y_total, _ = dataPP.train_test_split(trainset_ratio=0.1)
+X_total = X_total[:500, :]
+
+
+reward_list = []
+max_reward_list = []
+
+checkpoint_load = False
+checkpoint_epoch = _
 
 for i in tqdm(range(X_total.shape[0])):
     #obs_lc_num = np.random.randint(merge_num)
@@ -270,18 +285,60 @@ for i in tqdm(range(X_total.shape[0])):
     #writer = SummaryWriter("runs/mish_activation")
 
     # config
-    actor = Actor(state_dim, n_actions, activation=nn.Tanh)
-    critic = Critic(state_dim, activation=nn.Tanh)
+    if i==0:
+        actor = Actor(state_dim, n_actions, activation=nn.Tanh)
+        critic = Critic(state_dim, activation=nn.Tanh)
+        learner = A2CLearner(actor, critic)
 
-    learner = A2CLearner(actor, critic)
+        if checkpoint_load:
+            actor_checkpoint = torch.load(model_save_path+"actor_"+str(checkpoint_epoch)+".pt")
+            actor.load_state_dict(actor_checkpoint['model_state_dict'])
+            learner.actor_optim.load_state_dict(actor_checkpoint['optimizer_state_dict'])
+            critic_checkpoint = torch.load(model_save_path+"critic_"+str(checkpoint_epoch)+".pt")
+            critic.load_state_dict(critic_checkpoint['model_state_dict'])
+            learner.critic_optim.load_state_dict(critic_checkpoint['optimizer_state_dict'])
+
+
     runner = Runner(env)
 
     steps_on_memory = 50 
-    total_steps = 5
+    total_steps = 10
 
     for j in range(total_steps):
-        memory, last_reward = runner.run(steps_on_memory, i, j)
+        memory, last_reward, reward_lists = runner.run(steps_on_memory, i, j, (reward_list, max_reward_list))
+        reward_list = reward_lists[0]
+        max_reward_list = reward_lists[1]
         learner.learn(memory, runner.steps, discount_rewards=True)
-        if last_reward < -2e+2:
+        
+        if last_reward < -5e+2:
             break
+        
+        if runner.passed:
+            if env.obs_lc_num != 2:
+                env.obs_lc_num = env.obs_lc_num + 1
+            else:
+                if runner.all_done:
+                    break
+                else:
+                    env.obs_lc_num = 0
+
+    # Chekcpoint
+    if i%30 == 0:
+        torch.save({
+            'epoch':i,
+            'model_state_dict':actor.state_dict(),
+            'optimizer_state_dict':learner.actor_optim.state_dict()
+        }, model_save_path+"actor_"+str(i)+".pt")
+
+        torch.save({
+            'epoch':i,
+            'model_state_dict':critic.state_dict(),
+            'optimizer_state_dict':learner.critic_optim.state_dict()
+        }, model_save_path+"critic_"+str(i)+".pt")
+
+        with open(model_save_path+"reward_list.txt", 'a+') as file:
+            file.write('\n'.join(reward_list))
+
+        with open(model_save_path+"max_reward_list.txt", 'a+') as file:
+            file.write('\n'.join(max_reward_list))
     
