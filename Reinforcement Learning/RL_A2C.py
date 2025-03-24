@@ -8,6 +8,8 @@ Original file is located at
 """
 
 import os
+
+import torch.distributions.constraints
 os.environ['TF_ENABLE_ONEDNN_OPTS'] = '0'
 
 import numpy as np
@@ -35,14 +37,23 @@ def t(x):
     return torch.from_numpy(x).float()
 
 class Actor(nn.Module):
-    def __init__(self, state_dim, n_actions, hidden_size=256, activation=nn.Tanh):
+    def __init__(self, state_dim, n_actions, hidden_size=256, activation=nn.Tanh, prec=5):
         super().__init__()
         self.n_actions = n_actions
+        self.prec = prec
         self.model = nn.Sequential(
             nn.Linear(state_dim, hidden_size),
             activation(),
+            nn.Dropout(),
             nn.Linear(hidden_size, hidden_size),
             activation(),
+            nn.Dropout(),
+            nn.Linear(hidden_size, hidden_size),
+            activation(),
+            nn.Dropout(),
+            nn.Linear(hidden_size, hidden_size),
+            activation(),
+            nn.Dropout(),
             nn.Linear(hidden_size, n_actions)
         )
 
@@ -53,8 +64,10 @@ class Actor(nn.Module):
         means = self.model(X)
         stds = torch.clamp(self.logstds.exp(), 1e-3, 50)
 
+        #if not torch.is_tensor(self.prec):
+        #    self.prec = self.prec*torch.ones_like(means)
         return torch.distributions.Normal(means, stds)
-
+    
 ## Critic module
 class Critic(nn.Module):
     def __init__(self, state_dim, hidden_size=256, activation=nn.Tanh):
@@ -62,8 +75,16 @@ class Critic(nn.Module):
         self.model = nn.Sequential(
             nn.Linear(state_dim, hidden_size),
             activation(),
+            nn.Dropout(),
             nn.Linear(hidden_size, hidden_size),
             activation(),
+            nn.Dropout(),
+            nn.Linear(hidden_size, hidden_size),
+            activation(),
+            nn.Dropout(),
+            nn.Linear(hidden_size, hidden_size),
+            activation(),
+            nn.Dropout(),
             nn.Linear(hidden_size, 1),
         )
 
@@ -141,10 +162,6 @@ class A2CLearner():
         actor_loss.backward()
 
         clip_grad_norm_(self.actor_optim, self.max_grad_norm)
-        #writer.add_histogram("gradients/actor",
-        #                     torch.cat([p.grad.view(-1) for p in self.actor.parameters()]), global_step=steps)
-        #writer.add_histogram("parameters/actor",
-        #                     torch.cat([p.data.view(-1) for p in self.actor.parameters()]), global_step=steps)
         self.actor_optim.step()
 
         # critic
@@ -152,43 +169,38 @@ class A2CLearner():
         self.critic_optim.zero_grad()
         critic_loss.backward()
         clip_grad_norm_(self.critic_optim, self.max_grad_norm)
-        #writer.add_histogram("gradients/critic",
-        #                     torch.cat([p.grad.view(-1) for p in self.critic.parameters()]), global_step=steps)
-        #writer.add_histogram("parameters/critic",
-        #                     torch.cat([p.data.view(-1) for p in self.critic.parameters()]), global_step=steps)
         self.critic_optim.step()
 
-        # reports
-        #writer.add_scalar("losses/log_probs", -logs_probs.mean(), global_step=steps)
-        #writer.add_scalar("losses/entropy", entropy, global_step=steps)
-        #writer.add_scalar("losses/entropy_beta", self.entropy_beta, global_step=steps)
-        #writer.add_scalar("losses/actor", actor_loss, global_step=steps)
-        #writer.add_scalar("losses/advantage", advantage.mean(), global_step=steps)
-        #writer.add_scalar("losses/critic", critic_loss, global_step=steps)
 
 class Runner():
-    def __init__(self, env:AstEnv):
+    def __init__(self, env:AstEnv, prec = 5):
         self.env = env
         self.state = None
         self.done = True
         self.passed = False
         self.all_done = False
+        self.reward_past = None
         self.steps = 0
         self.episode_reward = 0
         self.episode_rewards = []
+        self.prec = prec
 
     def reset(self, passed):
         self.episode_reward = 0
         self.done = False
         self.passed = False
         self.state = self.env.reset(passed)
+        self.reward_past = None
 
     def run(self, max_steps, data_num, et, reward_lists, memory=None):
         reward_list = reward_lists[0]
         max_reward_list = reward_lists[1]
 
-        action_space_low = 0.01
-        action_space_high = 0.2 #0.15
+        prec = self.prec
+        R_cut_low = 0.25 #0.01 #0.25
+        R_cut_high = 1 #0.15
+        actions_space_low = [-prec, -prec, -prec, -prec]
+        actinos_space_high = [prec, prec, prec, prec]
 
         if not memory: memory = []
 
@@ -206,9 +218,15 @@ class Runner():
 
             dists = actor(t(self.state))
             actions = dists.sample().detach().data.numpy()
-            actions_clipped = np.clip(actions, [0, 0, 0, action_space_low], [1, 1, 1, action_space_high])
+            #print(actions)
+            actions[:-2] = actions[:-2] - actions[:-2]//1
+            actions[-2:] = np.clip(actions[-2:], [-prec, -prec], [prec, prec])
+            actions[2] = (actions[2]+prec)/(2*prec)
+            actions[3] = (actions[3]+prec)*(R_cut_high-R_cut_low)/(2*prec) + R_cut_low
 
-            next_state, reward, self.done, info = self.env.step(actions_clipped)
+            next_state, reward, self.done, info = self.env.step(actions)
+            if self.reward_past == None:
+                self.reward_past = reward
             self.passed = info[0]
             self.all_done = info[1]
             memory.append((actions, reward, self.state, next_state, self.done))
@@ -216,34 +234,34 @@ class Runner():
             self.state = next_state
             self.steps += 1
             #self.episode_reward += reward
-            #self.episode_reward += (reward - 80 - k*2)
-            self.episode_reward = reward
+            #self.episode_reward += (reward - k*2)
+            self.episode_reward += (reward - self.reward_past)*5 + reward
+            self.reward_past = reward
 
             max_reward = max(max_reward, reward)
-            if k%4 == 0:
-                print("Reward :", max_reward)
+            if k%8 == 0:
+                print("Reward : {:7.5g}".format(max_reward), end='')
+                print(" | actions :", actions)
                 max_reward = -9e+8
                 show_bool = True
 
-            if reward > 45 and show_bool:
+            if reward > 20 and show_bool:
                 print("show_passed : "+str(reward)+" | obs_lc_num : "+str(self.env.obs_lc_num))
                 self.env.show(str(data_num)+"_"+str(et)+"_"+str(k)+"_"+str(int(reward*100)/100)+"_"+"0306ast.png")
                 plt.close()
                 show_bool = False
 
             if self.done:
-                #print(actions_clipped)
                 if self.passed:
                     print("show_passed : "+str(reward)+" | obs_lc_num : "+str(self.env.obs_lc_num))
-                    self.env.show()
+                    self.env.show(str(data_num)+"_"+str(et)+"_"+str(k)+"_"+str(int(reward*100)/100)+"_"+"0306ast.png")
                     plt.close()
                     break    
                 self.episode_rewards.append(self.episode_reward)
                 max_reward_list.append(max_reward)
                 if len(self.episode_rewards) % 10 == 0:
                     print(" episode:", len(self.episode_rewards), ", episode reward:", self.episode_reward)
-                #writer.add_scalar("episode_reward", self.episode_reward, global_step=self.steps)
-
+                
         reward_list = reward_list + self.episode_rewards
         return memory, reward, (reward_list, max_reward_list)
 
@@ -264,14 +282,18 @@ dataPP.merge(merge_num=merge_num, ast_repeat_num=10, lc_len=lightcurve_unit_len,
 dataPP.X_total = dataPP.X_total.numpy()
 dataPP.Y_total = dataPP.Y_total.numpy()
 X_total, _, y_total, _ = dataPP.train_test_split(trainset_ratio=0.1)
-X_total = X_total[:500, :]
-
+X_total = X_total[:100, :]
 
 reward_list = []
 max_reward_list = []
 
-checkpoint_load = False
-checkpoint_epoch = _
+
+
+checkpoint_load = True
+checkpoint_epoch = 180
+prec = 5
+steps_on_memory = 200
+total_steps = 10
 
 for i in tqdm(range(X_total.shape[0])):
     #obs_lc_num = np.random.randint(merge_num)
@@ -279,41 +301,43 @@ for i in tqdm(range(X_total.shape[0])):
     env = AstEnv(X_total[i, :-9*merge_num], X_total[i, -9*merge_num:], merge_num, N_set, lightcurve_unit_len)
     if env.ell_err:
         continue
-    state_dim = (env.Ntheta*env.Nphi)//(2*env.ast_obs_unit_step) + 2*(lightcurve_unit_len//(4*env.lc_obs_unit_step))
+    #state_dim = (env.Ntheta*env.Nphi)//(2*env.ast_obs_unit_step) + 2*(lightcurve_unit_len//(4*env.lc_obs_unit_step))
+    state_dim = (env.Ntheta//env.ast_obs_unit_step)*(env.Nphi//env.ast_obs_unit_step) + (lightcurve_unit_len//env.lc_obs_unit_step)
     n_actions = 4
-
-    #writer = SummaryWriter("runs/mish_activation")
 
     # config
     if i==0:
-        actor = Actor(state_dim, n_actions, activation=nn.Tanh)
-        critic = Critic(state_dim, activation=nn.Tanh)
-        learner = A2CLearner(actor, critic)
+        actor = Actor(state_dim, n_actions, hidden_size=512, activation=nn.Tanh, prec=prec)
+        critic = Critic(state_dim, hidden_size=512, activation=nn.Tanh)
 
-        if checkpoint_load:
-            actor_checkpoint = torch.load(model_save_path+"actor_"+str(checkpoint_epoch)+".pt")
-            actor.load_state_dict(actor_checkpoint['model_state_dict'])
-            learner.actor_optim.load_state_dict(actor_checkpoint['optimizer_state_dict'])
-            critic_checkpoint = torch.load(model_save_path+"critic_"+str(checkpoint_epoch)+".pt")
-            critic.load_state_dict(critic_checkpoint['model_state_dict'])
-            learner.critic_optim.load_state_dict(critic_checkpoint['optimizer_state_dict'])
+        learner = A2CLearner(actor, critic, actor_lr=0.8e-4, critic_lr=0.8e-3)
+    runner = Runner(env, prec)
 
+    if i==0 and checkpoint_load:
+        actor_checkpoint = torch.load(model_save_path+"actor_"+str(checkpoint_epoch)+".pt")
+        actor.load_state_dict(actor_checkpoint['model_state_dict'])
+        learner.actor_optim.load_state_dict(actor_checkpoint['optimizer_state_dict'])
+        critic_checkpoint = torch.load(model_save_path+"critic_"+str(checkpoint_epoch)+".pt")
+        critic.load_state_dict(critic_checkpoint['model_state_dict'])
+        learner.critic_optim.load_state_dict(critic_checkpoint['optimizer_state_dict'])
 
-    runner = Runner(env)
-
-    steps_on_memory = 50 
-    total_steps = 10
-
+    reward_past = 0
     for j in range(total_steps):
-        memory, last_reward, reward_lists = runner.run(steps_on_memory, i, j, (reward_list, max_reward_list))
+        memory, last_reward, reward_lists = runner.run(steps_on_memory, i+checkpoint_epoch, j, (reward_list, max_reward_list))
         reward_list = reward_lists[0]
         max_reward_list = reward_lists[1]
         learner.learn(memory, runner.steps, discount_rewards=True)
+
+        if abs(last_reward - reward_past) < 1 and j != 0:
+            break
+        reward_past = last_reward + 0
         
-        if last_reward < -5e+2:
+        if (last_reward < -1.5e+2 and j >= 1) or runner.passed:
+            break
+        if (last_reward < 20 and j >= 6) or runner.passed:
             break
         
-        if runner.passed:
+        if False and runner.passed:
             if env.obs_lc_num != 2:
                 env.obs_lc_num = env.obs_lc_num + 1
             else:
@@ -328,17 +352,25 @@ for i in tqdm(range(X_total.shape[0])):
             'epoch':i,
             'model_state_dict':actor.state_dict(),
             'optimizer_state_dict':learner.actor_optim.state_dict()
-        }, model_save_path+"actor_"+str(i)+".pt")
+        }, model_save_path+"actor_"+str(i+checkpoint_epoch)+".pt")
 
         torch.save({
             'epoch':i,
             'model_state_dict':critic.state_dict(),
             'optimizer_state_dict':learner.critic_optim.state_dict()
-        }, model_save_path+"critic_"+str(i)+".pt")
+        }, model_save_path+"critic_"+str(i+checkpoint_epoch)+".pt")
 
         with open(model_save_path+"reward_list.txt", 'a+') as file:
-            file.write('\n'.join(reward_list))
+            for item in reward_list:
+                file.write(str(item)+",")
 
         with open(model_save_path+"max_reward_list.txt", 'a+') as file:
-            file.write('\n'.join(max_reward_list))
+            for item in max_reward_list:
+                file.write(str(item)+",")
+
+plt.plot(reward_list)
+plt.show()
+
+plt.plot(max_reward_list)
+plt.show()
     
