@@ -91,6 +91,51 @@ class Critic(nn.Module):
     def forward(self, X):
         return self.model(X)
 
+class NNBlender(nn.Module):
+    def __init__(self, NN_list, blend_boundary, blend_width):
+        super().__init__()
+        self.NN_list = NN_list
+        self.blend_boundary = blend_boundary
+        self.blend_width = blend_width
+        self.NN_num = len(blend_boundary) + 1
+        self.blend_coefs = np.zeros(self.NN_num)
+        self.blend_coefs[self.blend_coefs.shape[0]//2] = 1
+    
+    def forward(self, X, blend_coefs=None):
+        if blend_coefs != None:
+            self.blend_coefs = t(blend_coefs)
+        res = 0
+        for i in range(self.NN_num):
+            res = res + self.blend_coefs[i]*self.NN_list[i](X)
+        return res
+    
+    def set_blend_coef(self, reward):
+        for i in range(self.NN_num-1):
+            if i == 0:
+                if reward < self.blend_boundary[0] - self.blend_width:
+                    self.blend_coefs[:] = 0
+                    self.blend_coefs[0] == 1
+                    return
+            else:
+                if reward >= self.blend_boundary[i-1] + self.blend_width and reward < self.blend_boundary[i] - self.blend_width:
+                    self.blend_coefs[:] = 0
+                    self.blend_coefs[i] = 1
+                    return
+            
+            if reward >= self.blend_boundary[i] - self.blend_width and reward < self.blend_boundary[i] + self.blend_width:
+                self.blend_coefs[:] = 0
+                self.blend_coefs[i] = 0.5 - 0.5*(reward - self.blend_boundary[i])/self.blend_width
+                self.blend_coefs[i+1] = 0.5 + 0.5*(reward - self.blend_boundary[i])/self.blend_width
+                return
+
+            if i == self.NN_num-2:
+                if reward >= self.blend_boundary[self.NN_num-2] + self.blend_width:
+                    self.blend_coefs[:] = 0
+                    self.blend_coefs[self.NN_num-2] = 1
+                    return
+        raise NotImplementedError("NN Blending error : wrong region")
+
+
 def discounted_rewards(rewards, dones, gamma):
     ret = 0
     discounted = []
@@ -106,13 +151,15 @@ def process_memory(memory, gamma=0.99, discount_rewards=True):
     next_states = []
     rewards = []
     dones = []
+    blend_coefs_s = []
 
-    for action, reward, state, next_state, done in memory:
+    for action, reward, state, next_state, done, blend_coefs in memory:
         actions.append(action)
         rewards.append(reward)
         states.append(state)
         next_states.append(next_state)
         dones.append(done)
+        blend_coefs_s.append(blend_coefs)
 
     if discount_rewards:
         if False and dones[-1] == 0:
@@ -125,13 +172,13 @@ def process_memory(memory, gamma=0.99, discount_rewards=True):
     next_states = t(next_states)
     rewards = t(rewards).view(-1, 1)
     dones = t(dones).view(-1, 1)
-    return actions, rewards, states, next_states, dones
+    return actions, rewards, states, next_states, dones, blend_coefs_s
 
 def clip_grad_norm_(module, max_grad_norm):
     nn.utils.clip_grad_norm_([p for g in module.param_groups for p in g["params"]], max_grad_norm)
 
 class A2CLearner():
-    def __init__(self, actor, critic, gamma=0.9, entropy_beta=0,
+    def __init__(self, actor:NNBlender, critic:NNBlender, gamma=0.9, entropy_beta=0,
                  actor_lr=4e-4, critic_lr=4e-3, max_grad_norm=0.5):
         self.gamma = gamma
         self.max_grad_norm = max_grad_norm
@@ -142,13 +189,13 @@ class A2CLearner():
         self.critic_optim = torch.optim.Adam(critic.parameters(), lr=critic_lr)
 
     def learn(self, memory, steps, discount_rewards=True):
-        actions, rewards, states, next_states, dones = process_memory(memory, self.gamma, discount_rewards)
+        actions, rewards, states, next_states, dones, blend_coefs_s = process_memory(memory, self.gamma, discount_rewards)
 
         if not discount_rewards:
             td_target = rewards
         else:
-            td_target = rewards + self.gamma*critic(next_states)*(1-dones)
-        value = critic(states)
+            td_target = rewards + self.gamma*self.critic(next_states)*(1-dones)
+        value = self.critic(states)
         advantage = td_target - value
 
         # actor
@@ -171,10 +218,10 @@ class A2CLearner():
         clip_grad_norm_(self.critic_optim, self.max_grad_norm)
         self.critic_optim.step()
 
-
 class Runner():
-    def __init__(self, env:AstEnv, prec = 5):
+    def __init__(self, env:AstEnv, actor:NNBlender, prec = 5):
         self.env = env
+        self.actor = actor
         self.state = None
         self.done = True
         self.passed = False
@@ -216,7 +263,7 @@ class Runner():
             if self.done:
                 self.reset(self.passed)
 
-            dists = actor(t(self.state))
+            dists = self.actor(t(self.state))
             actions = dists.sample().detach().data.numpy()
             #print(actions)
             actions[:-2] = actions[:-2] - actions[:-2]//1
@@ -229,7 +276,8 @@ class Runner():
                 self.reward_past = reward
             self.passed = info[0]
             self.all_done = info[1]
-            memory.append((actions, reward, self.state, next_state, self.done))
+            self.actor.set_blend_coef(reward)
+            memory.append((actions, reward, self.state, next_state, self.done, self.actor.blend_coefs))
 
             self.state = next_state
             self.steps += 1
@@ -241,7 +289,8 @@ class Runner():
             max_reward = max(max_reward, reward)
             if k%8 == 0:
                 print("Reward : {:7.5g}".format(max_reward), end='')
-                print(" | actions :", actions)
+                print(" | actions :", actions, end='')
+                print(" | blending :", self.actor.blend_coefs)
                 max_reward = -9e+8
                 show_bool = True
 
@@ -295,31 +344,41 @@ prec = 5
 steps_on_memory = 200
 total_steps = 10
 
+blend_boundary = [-40, 10] #reward boundary of blending
+blend_width = 5
+NN_num = len(blend_boundary) + 1
+actors = []
+critics = []
+
 for i in tqdm(range(X_total.shape[0])):
     #obs_lc_num = np.random.randint(merge_num)
     #obs_lc_time = np.argmax(X_total[i, lightcurve_unit_len*(obs_lc_num):lightcurve_unit_len*(obs_lc_num+1)])
     env = AstEnv(X_total[i, :-9*merge_num], X_total[i, -9*merge_num:], merge_num, N_set, lightcurve_unit_len)
-    if env.ell_err:
-        continue
-    #state_dim = (env.Ntheta*env.Nphi)//(2*env.ast_obs_unit_step) + 2*(lightcurve_unit_len//(4*env.lc_obs_unit_step))
     state_dim = (env.Ntheta//env.ast_obs_unit_step)*(env.Nphi//env.ast_obs_unit_step) + (lightcurve_unit_len//env.lc_obs_unit_step)
     n_actions = 4
 
     # config
     if i==0:
-        actor = Actor(state_dim, n_actions, hidden_size=512, activation=nn.Tanh, prec=prec)
-        critic = Critic(state_dim, hidden_size=512, activation=nn.Tanh)
-
+        for k in range(NN_num):
+            actors.append(Actor(state_dim, n_actions, hidden_size=512, activation=nn.Tanh, prec=prec))
+            critics.append(Critic(state_dim, hidden_size=512, activation=nn.Tanh))
+                
+        actor = NNBlender(actors, blend_boundary, blend_width)
+        critic = NNBlender(critics, blend_boundary, blend_width)
         learner = A2CLearner(actor, critic, actor_lr=0.8e-4, critic_lr=0.8e-3)
     runner = Runner(env, prec)
 
     if i==0 and checkpoint_load:
-        actor_checkpoint = torch.load(model_save_path+"actor_"+str(checkpoint_epoch)+".pt")
-        actor.load_state_dict(actor_checkpoint['model_state_dict'])
-        learner.actor_optim.load_state_dict(actor_checkpoint['optimizer_state_dict'])
-        critic_checkpoint = torch.load(model_save_path+"critic_"+str(checkpoint_epoch)+".pt")
-        critic.load_state_dict(critic_checkpoint['model_state_dict'])
-        learner.critic_optim.load_state_dict(critic_checkpoint['optimizer_state_dict'])
+        for k in range(NN_num):
+            actor_checkpoint = torch.load(model_save_path+"actor"+str(k)+"_"+str(checkpoint_epoch)+".pt")
+            actors[k].load_state_dict(actor_checkpoint['model_state_dict'])
+            learner.actor_optim.load_state_dict(actor_checkpoint['optimizer_state_dict'])
+            critic_checkpoint = torch.load(model_save_path+"critic"+str(k)+"_"+str(checkpoint_epoch)+".pt")
+            critics[k].load_state_dict(critic_checkpoint['model_state_dict'])
+            learner.critic_optim.load_state_dict(critic_checkpoint['optimizer_state_dict'])
+
+    if env.ell_err:
+        continue
 
     reward_past = 0
     for j in range(total_steps):
