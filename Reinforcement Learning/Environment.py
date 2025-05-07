@@ -1,10 +1,7 @@
 import numpy as np
 from numpy import linalg as LA
 import matplotlib.pyplot as plt
-import torch
-import point_cloud_utils as pcu
 
-from DataPreprocessing import DataPreProcessing
 from Asteroid_Model import AsteroidModel
 from Ellipsoid_Approx import EllipsoidInversion
 
@@ -12,7 +9,7 @@ PI = 3.1415926535
 
 
 class AstEnv():
-    def __init__(self, target_lc, lc_info, lc_num, N_set=(40, 20), lc_unit_len=200):
+    def __init__(self, target_lc, lc_info, lc_num, reward_domain, N_set=(40, 20), lc_unit_len=200, ell_init=(False, False)):
         """
         target_lc
         lc_info : [sun_dir, earth_dir, rot_axis]
@@ -26,13 +23,20 @@ class AstEnv():
         self.lc_num = lc_num
 
         self.rot_axis = lc_info[-3:]
-        initial_eps = np.empty(2)
-        initial_eps[0] = np.arctan2(self.rot_axis[1], self.rot_axis[0])
-        initial_eps[1] = np.arccos(self.rot_axis[2]/LA.norm(self.rot_axis))
-        self.R_eps = AsteroidModel.rotArr(initial_eps[0], "z")@AsteroidModel.rotArr(initial_eps[1], "y")
+        self.initial_eps = np.empty(2)
+        self.initial_eps[0] = np.arctan2(self.rot_axis[1], self.rot_axis[0])
+        self.initial_eps[1] = np.arccos(self.rot_axis[2]/LA.norm(self.rot_axis))
+        self.R_eps = AsteroidModel.rotArr(self.initial_eps[0], "z")@AsteroidModel.rotArr(self.initial_eps[1], "y")
 
         self.lc_pred = np.ones(self.lc_unit_len*self.lc_num)
-        self.obs_lc_num = 0
+
+        #set obs lc as highest main freq lc
+        lc_stacks = self.target_lc.copy().reshape(-1, self.lc_unit_len)
+        lc_fft = np.abs(np.fft.fft(lc_stacks))[:, 1:50]
+        main_freq_idx = np.argmax(lc_fft, axis=-1)
+        self.obs_lc_num = np.argmax(main_freq_idx)
+        #self.obs_lc_num = 0
+        
         self.__set_obs_params()
         """
         self.obs_lc_num = np.random.randint(lc_num)
@@ -42,13 +46,15 @@ class AstEnv():
         self.obs_phi, self.obs_theta = self.__obs_dir_cal()
         """
 
-        self.ast_obs_unit_step = 4 #2
+        self.ast_obs_unit_step = 2 #2
         self.lc_obs_unit_step = 2 #2
 
         self.Nphi, self.Ntheta = N_set[0], N_set[1]
         self.dphi, self.dtheta = 2*PI/self.Nphi, PI/self.Ntheta
-        self.reward_threshold = 60 #70
-        self.total_threshold = 60 #70
+        
+        self.reward_threshold = reward_domain[1] #70
+        self.total_threshold = reward_domain[1] #70
+        self.err_min = reward_domain[0]
         self.ell_err = False
 
         # Initialize asteroid
@@ -56,7 +62,7 @@ class AstEnv():
         self.max_reward = -9e+8
         self.lc_pred = np.ones(self.lc_unit_len*self.lc_num)
         self.ast_backup = None
-        self.reset(True)
+        self.reset(True, ell_init)
         self.ast_backup = self.ast.copy()
         """
         self.__ellipsoid()
@@ -77,7 +83,7 @@ class AstEnv():
         """
         Generate initial ellipsoid s.t. most fit to target_lc
         """
-        lr = 4e-3
+        lr = 5e-3
         max_epoch = 30
         EllInv = EllipsoidInversion(1, lr, max_epoch, (20, 10))
         param_res, min_param, min_reward = EllInv.opt(self.obs_lc_full, self.obs_lc_info)
@@ -113,6 +119,7 @@ class AstEnv():
     def __r_arr_obs(self):
         obs_r_arr_temp = self.ast.pos_sph_arr[:-1, :-1, 0] + 0
         obs_vec = np.array([np.sin(self.obs_theta)*np.cos(self.obs_phi), np.sin(self.obs_theta)*np.sin(self.obs_phi), np.cos(self.obs_theta)])
+        """
         for i in range(self.Nphi):
             for j in range(self.Ntheta):
                 phi_ij = (j%2)*(self.dphi/2) + i*self.dphi
@@ -120,12 +127,12 @@ class AstEnv():
                 r_vec = np.array([np.sin(theta_ij)*np.cos(phi_ij), np.sin(theta_ij)*np.sin(phi_ij), np.cos(theta_ij)])
                 if np.dot(obs_vec, r_vec) <= 0:
                     obs_r_arr_temp[i, j] = 0
+        """
         obs_r_arr = obs_r_arr_temp[::self.ast_obs_unit_step, ::self.ast_obs_unit_step] + 0
         obs_r_arr = obs_r_arr.flatten()
 
         return obs_r_arr
-
-    # currently not using
+    
     def _obs(self):
         #r_arr obs
         obs_r_arr = self.__r_arr_obs()
@@ -149,10 +156,12 @@ class AstEnv():
         obs_r_arr = self.__r_arr_obs()
 
         obs_lc = self.obs_lc_full[::self.lc_obs_unit_step] - self.lc_pred[self.obs_lc_num*self.lc_unit_len:(self.obs_lc_num+1)*self.lc_unit_len:self.lc_obs_unit_step]
-        obs_tensor = np.concatenate((obs_r_arr, obs_lc))
+        obs_lc_normalized = obs_lc*10/np.max(np.abs(obs_lc))
+        obs_tensor = np.concatenate((obs_r_arr, obs_lc_normalized))
+        obs_tensor = np.concatenate((obs_tensor, np.repeat(10*self.obs_lc_info, 5)))
         return obs_tensor
     
-    def step(self, action, mode='ratio_assign'):
+    def step(self, action, mode='ratio_assign', update=True):
         """
         action = [R_cut, r, phi, theta]
         if mode == 'ratio_assign'
@@ -186,16 +195,20 @@ class AstEnv():
             done = True
             passed = True
             all_done = self.__test__all()
-        elif reward <= min(-4e+2, self.reward0):
+        elif reward < self.max_reward - 3.5:#min(-4e+2, self.reward0):
             done = True
             passed = False
 
         observation = self.obs()
-        self.ast_backup = self.ast.copy()
+        _ = self.reward(include_other=True)
 
+        #print(str(int(reward*1000)/1000) + "|" + str(int(self.max_reward*1000)/1000), end=' ')
+        if reward > self.max_reward and update:
+            self.max_reward = reward + 0.0
+            self.ast_backup = self.ast.copy()
+            
         return observation, reward, done, (passed, all_done)
 
-    # currently not using 
     def _step(self, action, mode='ratio_assign'):
         """
         action = [R_cut, r, phi, theta]
@@ -275,12 +288,12 @@ class AstEnv():
             
             if relative:
                 amp = self.__amp_lc(target_lc_temp)
-                loss = np.mean((50*(target_lc_temp - lc_temp)/amp)**2) #40
+                loss = np.mean((80*(target_lc_temp - lc_temp)/amp)**2) #40
 
-                loss_i = 110*np.trapz(np.abs(target_lc_temp-lc_temp))/(100*self.__amp_lc(target_lc_temp))
-                loss_d = np.mean((9*(np.diff(target_lc_temp)-np.diff(lc_temp)))**2)
+                loss_i = 60*np.trapz(np.abs(target_lc_temp-lc_temp))/(100*amp)
+                loss_d = np.mean((40*(np.diff(target_lc_temp)-np.diff(lc_temp)))**2)
                 #loss = (loss + loss_i + loss_d)*3/10
-                loss = (1.2*loss + loss_i + loss_d)*3/10
+                loss = (1.2*loss + loss_i + loss_d)*2/10
             else:
                 loss = np.mean((target_lc_temp - lc_temp)**2)
 
@@ -302,27 +315,32 @@ class AstEnv():
         
         return reward
     
-    def reset(self, passed):
+    def reset(self, passed, ell_init=(False, False)):
         if self.ast_backup == None:
-            max_try = 4
+            max_try = 5
             for i in range(max_try+1):
-                if i == max_try:
-                    self.ell_err = True
-                
-                self.__ellipsoid()
+                if ell_init[0]:
+                    ell_arr = ell_init[1]
+                    self.R_set = ell_arr[:3]
+                    self.tilt = ell_arr[3:]
+                else:
+                    self.__ellipsoid()
                 self.ast = AsteroidModel(axes=self.R_set, N_set=(self.Nphi, self.Ntheta), tilt_mode="assigned", tilt=self.tilt, interior_cal=False)
                 self.ast.base_fitting_generator(mode="ellipsoid")
                 self.lc_pred = np.ones(self.lc_unit_len*self.lc_num)
-                _, self.reward0, _, _ = self.step((0, 100, 0, 0)) #initialize/recalculate lc_pred
+                _, self.reward0, _, _ = self.step((0, 0, 0, 0)) #initialize/recalculate lc_pred
 
-                if self.reward0 > -100:
+                #print(self.reward0)
+                if self.reward0 > self.err_min and self.reward0 < self.err_min+30:#self.total_threshold:
                     break
 
+                if i == max_try:
+                    self.ell_err = True
         else:
             if not passed:
                 self.ast = self.ast_backup.copy()
             self.__set_obs_params()
-            self.step((0, 100, 0, 0)) #initialize/recalculate lc_pred
+            self.step((0, 0, 0, 0)) #initialize/recalculate lc_pred
 
         return self.obs()
     
@@ -395,8 +413,14 @@ class AstEnv():
 
         color = ['coral', 'gold', 'skyblue']
         for i in range(self.lc_num):
-            ax1.plot(self.target_lc[self.lc_unit_len*i:self.lc_unit_len*(i+1)], color=color[i], linestyle='solid')
-            ax1.plot(self.lc_pred[self.lc_unit_len*i:self.lc_unit_len*(i+1)], color=color[i], linestyle='dashed')
+            if i == self.obs_lc_num:
+                ax1.plot(self.target_lc[self.lc_unit_len*i:self.lc_unit_len*(i+1)], color=color[i], linestyle='solid') #black
+                ax1.plot(self.lc_pred[self.lc_unit_len*i:self.lc_unit_len*(i+1)], color=color[i], linestyle='dashed')
+                ax1.set_ylim([np.min(self.target_lc[self.lc_unit_len*i:self.lc_unit_len*(i+1)])-5, np.max(self.target_lc[self.lc_unit_len*i:self.lc_unit_len*(i+1)])+5])
+                #ax1.set_ylim([np.min(self.lc_pred[self.lc_unit_len*i:self.lc_unit_len*(i+1)])-5, np.max(self.lc_pred[self.lc_unit_len*i:self.lc_unit_len*(i+1)])+5])
+            else:
+                ax1.plot(self.target_lc[self.lc_unit_len*i:self.lc_unit_len*(i+1)], color=color[i], linestyle='solid')
+                ax1.plot(self.lc_pred[self.lc_unit_len*i:self.lc_unit_len*(i+1)], color=color[i], linestyle='dashed')
         ax1.set_title("Lightcurve")
 
         ax2.set_box_aspect((1, 1, 1))
