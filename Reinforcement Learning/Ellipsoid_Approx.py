@@ -4,7 +4,6 @@ import torch
 from torch import nn, optim
 from tqdm import tqdm
 from torchsummary import summary
-import copy
 
 from DataPreprocessing import DataPreProcessing
 
@@ -296,11 +295,19 @@ class EllipsoidInversion():
             #target_diff = torch.diff(target_lc)
             #amp_diff = torch.max(pred_diff) - torch.min(pred_diff)
             
+            
             loss0 = lossfn(pred/amp, target_lc/amp)
             #loss1 = lossfn(pred_diff, target_diff)
             loss0 = 100 * torch.sqrt(loss0)
             #loss1 = 5e-4 * loss1
             loss = loss0#loss1 + 1.5*loss0
+
+            """
+            loss = torch.mean((50*(target_lc - pred)/amp)**2) #40
+            loss_i = 110*torch.trapezoid(torch.abs(target_lc-pred))/(100*amp)
+            loss_d = torch.mean((9*(torch.diff(target_lc)-torch.diff(pred)))**2)
+            loss = (1.2*loss + loss_i + loss_d)*3/10
+            """
 
             if loss_min > loss.item():
                 loss_min = loss.item()
