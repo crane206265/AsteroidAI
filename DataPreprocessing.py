@@ -5,10 +5,15 @@ from torch.utils import data
 from itertools import combinations
 from scipy.special import factorial
 from tqdm import tqdm
+import random
+from scipy.special import sph_harm_y
 
+
+random.seed(1)
+np.random.seed(1)
 
 class DataPreProcessing():
-    def __init__(self, data_path):
+    def __init__(self, data_path, ell_approx=False):
         # Dataset Preparation
         total_data = np.load(data_path)
         self.X_total = torch.tensor(total_data['X_total'].astype(np.float32))
@@ -19,38 +24,77 @@ class DataPreProcessing():
         # complex to real
         self.Y_total = torch.view_as_real(self.Y_total).type(torch.float32)
         self.Y_total = torch.flatten(self.Y_total, 1)
-        self.Y_total = torch.cat((self.Y_total[:, :-5], torch.unsqueeze(self.Y_total[:, -4], dim=1), torch.unsqueeze(self.Y_total[:, -2], dim=1)), dim=1)
-        self.Y_total = torch.cat((DataPreProcessing.coef_zip(self.Y_total[:, :-3]), self.Y_total[:, -3:]), dim=1)
-        self.Y_total = 32*self.Y_total[:, :-3]
-        
+        self.Y_total = torch.cat((self.Y_total[:, :-15], self.Y_total[:, -14::2]), dim=1)
+        self.Y_total = torch.cat((DataPreProcessing.coef_zip(self.Y_total[:, :-(3+5)]), self.Y_total[:, -(3+5):]), dim=1)
+        self.X_total = torch.cat((self.X_total, self.Y_total[:, -(3+5):]), dim=1)
+        self.Y_total = self.Y_total[:, :-(3+5)]
 
-    def merge(self, merge_num:int, ast_repeat_num=10, lc_len=200):
+        #self.X_total = torch.cat((self.X_total[..., :100], self.X_total[..., -6:]), dim=1)
+
+        self.coef2R_prepared = False
+
+
+    def coef2R(self, coef_arr, l_max=8, N_set=(40, 20)):
+        if not self.coef2R_prepared:
+            self.__coef2R_prepare(l_max, N_set)
+
+        coef_arr_complex = torch.view_as_complex(DataPreProcessing.coef_unzip(coef_arr).reshape(coef_arr.shape[0], -1, 2))
+        self.Y_total = torch.real(torch.tensordot(coef_arr_complex, self.sph_values, dims=([-1], [0]))) #[Data Number X Nphi*Ntheta]
+        self.Y_total = torch.flatten(self.Y_total, start_dim=-2)
+
+    def __coef2R_prepare(self, l_max, N_set):
+        PI = 3.1415926535
+        self.Nphi, self.Ntheta = N_set[0], N_set[1]
+        self.dphi, self.dtheta = 2*PI/self.Nphi, PI/self.Ntheta
+        self.l_max = l_max
+        self.sph_values = torch.zeros((self.l_max+1)**2, self.Nphi, self.Ntheta, dtype=torch.complex64)
+
+        for l in range(self.l_max+1):
+            for m in range(-l, l+1):
+                for i in range(self.Ntheta):
+                    for j in range(self.Nphi):
+                        phi_ij = (i%2)*(self.dphi/2) + j*self.dphi
+                        theta_ij = i*self.dtheta
+                        self.sph_values[l**2+l+m, j, i] = torch.from_numpy(sph_harm_y(l, m, theta_ij, phi_ij))
+        
+        self.coef2R_prepared = True
+
+
+    def merge(self, merge_num:int, ast_repeat_num=10, lc_len=200, dupl_ratio = 0.3):
         """
         merge lightcurves
         merge_num <= ast_repeat_num (lc_num in DataGenerator.py) = 10
         * use before shuffling
         """
         self.merge_num = merge_num
-        ast_num = self.X_total.shape[0]//10
-        new_X_len = int(factorial(ast_repeat_num)/(factorial(merge_num)*factorial(ast_repeat_num-merge_num))) * ast_num
-        new_X = torch.zeros(new_X_len, (lc_len+6)*merge_num)
+        ast_num = self.X_total.shape[0]//ast_repeat_num
+        combi_num0 = int(factorial(ast_repeat_num)/(factorial(merge_num)*factorial(ast_repeat_num-merge_num)))
+        combi_num = int(combi_num0 * dupl_ratio)
+        new_X_len = combi_num * ast_num
+        new_X = torch.zeros(new_X_len, (lc_len+9+5)*merge_num)
         new_Y = torch.zeros(new_X_len, self.Y_total.shape[-1])
         print("MERGING DATASET")
-        for ast in tqdm(range(0, ast_num*ast_repeat_num, 10)):
-            i = 0
-            for combi in combinations(range(ast_repeat_num), merge_num):
+        i = 0
+        for ast in tqdm(range(ast_num)):
+            combi_list = list(combinations(range(ast_repeat_num), merge_num))
+            random.shuffle(combi_list)
+            for combi in combi_list[:combi_num]:
                 j = 0
                 for cb_idx in combi:
-                    new_X[ast + i, j*lc_len:(j+1)*lc_len] = self.X_total[ast+cb_idx, :lc_len]
-                    new_X[ast + i, lc_len*merge_num+j*6:lc_len*merge_num+(j+1)*6] = self.X_total[ast+cb_idx, lc_len:]
-                    new_Y[ast + i, :] = self.Y_total[ast+cb_idx, :]
+                    new_X[i, j*lc_len:(j+1)*lc_len] = self.X_total[ast*ast_repeat_num+cb_idx, :lc_len]
+                    new_X[i, lc_len*merge_num+j*(9+5):lc_len*merge_num+(j+1)*(9+5)] = self.X_total[ast*ast_repeat_num+cb_idx, -(9+5):]
+                    new_Y[i, :] = self.Y_total[ast*ast_repeat_num+cb_idx, :]
                     j += 1
                 i += 1
         
         print(new_X.shape, new_Y.shape)
         self.X_total = new_X
         self.Y_total = new_Y
-        
+        self.dataset_len = self.X_total.shape[0]
+
+
+###### 이 밑으로 ell_approx 수정 안함!! #####
+    #raise Warning("Ellipsoid Approximation is not implemented below")
 
     def scale_data(self, **kwargs):
         self.scaler = DataScaling(self.Y_total)#[:, :-3])
@@ -69,7 +113,7 @@ class DataPreProcessing():
             self.X_total[..., :int(-6*self.merge_num)], self.Y_total = self.scaler.lc_scale(self.X_total[..., :int(-6*self.merge_num)], self.Y_total, scaled_mean=scaled_mean)
         elif mode == "dir_scaling":
             scaled_size = kwargs["scaled_size"]
-            self.X_total[..., int(-6*self.merge_num):] = scaled_size * self.X_total[..., int(-6*self.merge_num):]
+            self.X_total[..., int(-9*self.merge_num):] = scaled_size * self.X_total[..., int(-9*self.merge_num):]
 
     def return_data(self, type):
         if type=='X':
