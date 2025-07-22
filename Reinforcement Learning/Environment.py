@@ -26,7 +26,7 @@ class AstEnv():
         self.initial_eps = np.empty(2)
         self.initial_eps[0] = np.arctan2(self.rot_axis[1], self.rot_axis[0])
         self.initial_eps[1] = np.arccos(self.rot_axis[2]/LA.norm(self.rot_axis))
-        self.R_eps = AsteroidModel.rotArr(self.initial_eps[0], "z")@AsteroidModel.rotArr(self.initial_eps[1], "y")
+        self.R_eps = AsteroidModel.rotArr(-self.initial_eps[1], "y")@AsteroidModel.rotArr(-self.initial_eps[0], "z")
 
         self.lc_pred = np.ones(self.lc_unit_len*self.lc_num)
 
@@ -43,7 +43,7 @@ class AstEnv():
         self.obs_time = np.argmax(target_lc[lc_unit_len*(self.obs_lc_num):lc_unit_len*(self.obs_lc_num+1)])
         self.obs_lc_full = self.target_lc[self.lc_unit_len*(self.obs_lc_num):self.lc_unit_len*(self.obs_lc_num+1)]
         self.obs_lc_info = lc_info[9*(self.obs_lc_num):9*(self.obs_lc_num+1)]
-        self.obs_phi, self.obs_theta = self.__obs_dir_cal()
+        self.obs_phi, self.obs_theta = self.obs_dir_cal()
         """
 
         self.ast_obs_unit_step = 2 #2
@@ -84,13 +84,13 @@ class AstEnv():
         Generate initial ellipsoid s.t. most fit to target_lc
         """
         lr = 5e-3
-        max_epoch = 30
-        EllInv = EllipsoidInversion(1, lr, max_epoch, (20, 10))
-        param_res, min_param, min_reward = EllInv.opt(self.obs_lc_full, self.obs_lc_info)
-        self.R_set = (5, 3*min_param[0].item()+5, 3*min_param[1].item()+5)
-        self.tilt = ((min_param[2].item()+1)*np.pi/2, ((min_param[3].item()+1)*np.pi/2))
-        print(min_param)
-
+        max_epoch = 20 #30
+        EllInv = EllipsoidInversion(1, lr, max_epoch, (40, 20))
+        param_res, min_param, min_reward, self.min_pred, self.min_r_arr = EllInv.opt(self.obs_lc_full, self.obs_lc_info)
+        self.R_set = (5, 3*min_param[0]+5, 3*min_param[1]+5)
+        self.tilt = ((min_param[2]+1)*np.pi/2, ((min_param[3]+1)*np.pi/2))
+        
+        print("min_param", self.R_set, self.tilt)
         '''
         if min_reward > 100:
             self.ell_err = True
@@ -103,16 +103,16 @@ class AstEnv():
         #self.R_set = tuple(self.R_set)
         #self.tilt = tuple(self.tilt)
 
-    def __obs_dir_cal(self):
+    def obs_dir_cal(self):
         """
         calculate obs_phi, obs_theta : (direction to earth in geocentric coord.)
         """
-        Edir = self.__orb2geo((self.obs_lc_info[3:6]).T, 2*PI*self.obs_time/self.lc_unit_len)
+        Edir = self.orb2geo((self.obs_lc_info[3:6]).T, 2*PI*self.obs_time/self.lc_unit_len)
         Edir_phi = np.arctan2(Edir[1], Edir[0])
         Edir_theta = np.arccos(Edir[2]/LA.norm(Edir))
         return Edir_phi, Edir_theta
 
-    def __orb2geo(self, vec_orb, rot_angle):
+    def orb2geo(self, vec_orb, rot_angle):
         return AsteroidModel.rotArr(-rot_angle, "z")@self.R_eps@vec_orb
     
 
@@ -170,15 +170,16 @@ class AstEnv():
         done = False
         all_done = False
         passed = False
-        if mode == 'ratio_assign':
-            phi_action = (self.obs_phi/(2*PI) + action[0])%1 # action be a relative ratio from obs_phi
-            theta_action = (self.obs_theta/PI + action[1])%1 # action be a relative ratio from obs_theta
-            self.ast.cut_ast(1, 0, True, mode='ratio_assign', pos_sph=(phi_action, theta_action, action[2], action[3]))
-        elif mode == 'coord_assign':
-            cut_sph_pos = AsteroidModel.sph2cart((action[1], action[2], action[3]))
-            self.ast.cut_ast(1, 0, True, mode='Rxyz_assign', pos_sph=(action[0], cut_sph_pos[0], cut_sph_pos[1], cut_sph_pos[2]))
-        else:
-            raise NotImplementedError
+        if not (action[0] == 0 and action[1] == 0):
+            if mode == 'ratio_assign':
+                phi_action = (self.obs_phi/(2*PI) + action[0])%1 # action be a relative ratio from obs_phi
+                theta_action = (self.obs_theta/PI + action[1])%1 # action be a relative ratio from obs_theta
+                self.ast.cut_ast(1, 0, True, mode='ratio_assign', pos_sph=(phi_action, theta_action, action[2], action[3]))
+            elif mode == 'coord_assign':
+                cut_sph_pos = AsteroidModel.sph2cart((action[1], action[2], action[3]))
+                self.ast.cut_ast(1, 0, True, mode='Rxyz_assign', pos_sph=(action[0], cut_sph_pos[0], cut_sph_pos[1], cut_sph_pos[2]))
+            else:
+                raise NotImplementedError
 
 
         # Maintaining the radius mean of asteroid r_arr
@@ -189,7 +190,7 @@ class AstEnv():
 
         self.ast.surf_vec_cal()
 
-        reward = self.reward(init=100.0, rooted=False, relative=True)
+        reward = self.reward(init=100.0, rooted=False, include_other=False, relative=True)
         #print(reward, "REWARD")
         if reward > self.reward_threshold:
             done = True
@@ -317,7 +318,7 @@ class AstEnv():
     
     def reset(self, passed, ell_init=(False, False)):
         if self.ast_backup == None:
-            max_try = 5
+            max_try = 20 # original : 5, this is changed value for Ellipsoid_Approx_Data 
             for i in range(max_try+1):
                 if ell_init[0]:
                     ell_arr = ell_init[1]
@@ -329,9 +330,20 @@ class AstEnv():
                 self.ast.base_fitting_generator(mode="ellipsoid")
                 self.lc_pred = np.ones(self.lc_unit_len*self.lc_num)
                 _, self.reward0, _, _ = self.step((0, 0, 0, 0)) #initialize/recalculate lc_pred
+                #print(self.R_eps)
+                print("[AstEnv] self.reward0 =", self.reward0)
+
+                self.min_r_arr = np.sqrt(self.min_r_arr[:, :, 0]**2 + self.min_r_arr[:, :, 1]**2 + self.min_r_arr[:, :, 2]**2)
+                print("MSE r_arr :", np.sqrt(np.mean((self.min_r_arr * 1 / np.mean(self.min_r_arr) - self.ast.pos_sph_arr[:, :, 0] * 1 / np.mean(self.ast.pos_sph_arr[:, :, 0]))**2)))
+                
+
+                plt.plot(self.min_pred * self.__lc_mean(self.lc_pred) / self.__lc_mean(self.min_pred), linestyle='solid', label="min_pred")
+                plt.plot(self.target_lc, linestyle='solid', label='target_lc')
+                plt.legend()
+                plt.show()
 
                 #print(self.reward0)
-                if self.reward0 > self.err_min and self.reward0 < self.err_min+30:#self.total_threshold:
+                if self.reward0 > self.err_min and self.reward0 < self.total_threshold:#self.err_min+30:
                     break
 
                 if i == max_try:
@@ -349,7 +361,7 @@ class AstEnv():
         self.obs_time = np.argmax(np.abs(self.target_lc[self.lc_unit_len*(self.obs_lc_num):self.lc_unit_len*(self.obs_lc_num+1)] - self.lc_pred[self.lc_unit_len*(self.obs_lc_num):self.lc_unit_len*(self.obs_lc_num+1)]))
         self.obs_lc_full = self.target_lc[self.lc_unit_len*(self.obs_lc_num):self.lc_unit_len*(self.obs_lc_num+1)]
         self.obs_lc_info = self.lc_info[9*(self.obs_lc_num):9*(self.obs_lc_num+1)]
-        self.obs_phi, self.obs_theta = self.__obs_dir_cal()
+        self.obs_phi, self.obs_theta = self.obs_dir_cal()
 
     def __lc_gen(self, lc_info, flux0=10):
         Sdir = lc_info[0:3]
@@ -361,8 +373,10 @@ class AstEnv():
         generated_lc = np.zeros(self.lc_unit_len)
         for t in range(self.lc_unit_len):
             theta_t = 2*PI*t/self.lc_unit_len
-            Edir_t = self.R_eps.T@self.__orb2geo(Edir.T, theta_t) #Edir(0) -> Edir(t)
-            Sdir_t = self.R_eps.T@self.__orb2geo(Sdir.T, theta_t) #Sdir(0) -> Sdir(t)
+            Edir_t = self.R_eps.T@self.orb2geo(Edir.T, theta_t) #Edir(0) -> Edir(t)    
+            Sdir_t = self.R_eps.T@self.orb2geo(Sdir.T, theta_t) #Sdir(0) -> Sdir(t)    
+            Edir_t = Edir_t / LA.norm(Edir_t)
+            Sdir_t = Sdir_t / LA.norm(Sdir_t)
             generated_lc[t] = AstEnv.__ReLU(N_arr@Edir_t).T@AstEnv.__ReLU(N_arr@Sdir_t)
         generated_lc = flux0 * generated_lc
 
