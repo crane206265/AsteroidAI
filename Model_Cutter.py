@@ -29,8 +29,8 @@ class CutterSphere():
             if mode == 'ratio_assign' *args = (phi, theta, r_cen_ratio, r_cut_ratio)
         ast : Asteroid_Model#class
         """
-        self.k = 0.1 #cut ratio 0.2
-        self.min_cen = 8 #3 - for generating asteroid
+        self.k = 0.1#7e-3 #cut ratio 0.2
+        self.min_cen = 7 #3 - for generating asteroid
         self.max_cen = 13 #10
 
         if random == False and mode == 'Rxyz_assign':
@@ -62,7 +62,7 @@ class CutterSphere():
         if random == False and mode == 'ratio_assign':
             self.r_cen = (self.min_cen + (self.max_cen-self.min_cen)*self.r_cen_ratio)*self.r_ast
             self.radi = self.k*self.r_ast*self.R_cut_ratio + self.r_cen - self.r_ast
-        
+            
         else:
             self.r_cen = (self.min_cen + (self.max_cen-self.min_cen)*np.random.rand())*self.r_ast
             self.radi = self.k*self.r_ast*np.random.rand() + self.r_cen - self.r_ast
