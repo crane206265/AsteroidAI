@@ -43,6 +43,8 @@ class AsteroidModel():
         self.valid_lw_bd = 0
         self.valid_up_bd = N_index
 
+        self.COM_vec = np.zeros((3))
+
     @staticmethod
     def rotArr(angle, axis):
         # for rotational matrix
@@ -186,7 +188,7 @@ class AsteroidModel():
             long = self.tilt[0]
         else:
             long = tilt_angle[0]
-        if tilt_angle[0] == -1:
+        if tilt_angle[1] == -1:
             lat = self.tilt[1]
         else:
             lat = tilt_angle[1]
@@ -318,7 +320,6 @@ class AsteroidModel():
                         self.is_interior[x_idx, y_idx, z_idx] = 0
 
     def COM_correction(self, rho_func, const_rho="Y"):
-        self.COM_vec = np.zeros((3))
         if const_rho == "Y":
             for component in range(3):
                 prec = self.discr_param[0]
@@ -389,6 +390,23 @@ class AsteroidModel():
 
         else:
             pass
+
+
+    def copy(self):
+        ast_copy = AsteroidModel((1, 1, 1), (self.Nphi, self.Ntheta), interior_cal=self.interior_cal, coord2discrete_param=self.discr_param)
+        ast_copy.pos_sph_arr = self.pos_sph_arr.copy()
+        ast_copy.pos_cart_arr = self.pos_cart_arr.copy()
+        ast_copy.surf_vec_arr = self.surf_vec_arr.copy()
+        ast_copy.albedo_arr = self.albedo_arr.copy()
+        ast_copy.axes_R = self.axes_R.copy()
+        ast_copy.tilt = self.tilt.copy()
+        ast_copy.is_interior = self.is_interior.copy()
+        ast_copy.max_r = self.max_r + 0
+        ast_copy.valid_lw_bd = self.valid_lw_bd + 0
+        ast_copy.valid_up_bd = self.valid_up_bd + 0
+        ast_copy.COM_vec = self.COM_vec.copy()
+
+        return ast_copy
 
 
     def ast_display(self):
