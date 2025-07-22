@@ -40,13 +40,13 @@ class LightCurve():
         Asteroid.inertia_tensor_cal(0.5)
         Asteroid.COM_correction(0.5)
         self.inertia_tensor = Asteroid.inertia_tensor
-        self.initial_w0 = 4*self.R_eps.T@np.array([0, 0, 1]).T
+        self.initial_w0 = self.R_eps.T@np.array([0, 0, 1]).T
         if principle_axis:
             self.principle_axis(1)
             initial_eps = np.empty(2)
             initial_eps[0] = np.arctan2(self.initial_w0[1], self.initial_w0[0])
             initial_eps[1] = np.arccos(self.initial_w0[2]/LA.norm(self.initial_w0))
-            self.R_eps = self.rotArr(initial_eps[0], "z")@self.rotArr(initial_eps[1], "y")
+            self.R_eps = self.rotArr(-initial_eps[1], "y")@self.rotArr(-initial_eps[0], "z")
     
 
         self.rot_angle_list = [0]
@@ -180,7 +180,7 @@ class LightCurve():
         len_ratio : length of lc for ratio of period
         """
         self.lc_arr = np.zeros(int(rot_div_N*len_ratio))
-        dt = 1/rot_div_N
+        dt = 2*np.pi/rot_div_N
         w0 = self.initial_w0
         rot_angle = 0
         for i in range(int(rot_div_N*len_ratio)):    
