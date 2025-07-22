@@ -55,7 +55,7 @@ class Runner():
         modified_reward *= 40/(self.env.total_threshold - self.env.reward0)
         return modified_reward
 
-    def run(self, env_no, random=True):
+    def run(self, env_no, random=True, save=False):
         prec = self.prec
         r_cen_low = 0.2
         r_cen_high = 1
@@ -103,7 +103,7 @@ class Runner():
 
             
             if reward >= reward_threshold_list[get]:
-                self.make_map(reward, self.state, env_no, random)
+                self.make_map(reward, self.state, env_no, random, save)
                 get += 1
             
             if get == get_env_num: break
@@ -127,13 +127,25 @@ class Runner():
                     print("show_passed : "+str(reward)+" | obs_lc_num : "+str(self.env.obs_lc_num))
                     break
 
-    def make_map(self, ref_reward, state, env_no, random):
+    def make_map(self, ref_reward, state, env_no, random, save):
         ratio_action_set = [(0.1, 0.1)]#, (0.3, 0.3), (0.5, 0.5), (1, 1)]
         ref_ast = self.env.ast.copy()
+        resol = 1
+
         rot_axis = self.env.initial_eps * 180/np.pi
         rot_axis[0] = rot_axis[0]%360
         rot_axis[1] = rot_axis[1]%180
-        resol = 1
+
+        circle_points = 200
+        Edirs = np.zeros((2, circle_points))
+        Sdirs = np.zeros((2, circle_points))
+        for t in range(circle_points):
+            Edir = self.env.R_eps.T@self.env.orb2geo((self.env.obs_lc_info[3:6]).T, 2*np.pi*t/circle_points)   ##########AstEnv에 N_arr랑 하는거 수정시 이것도 수정 필요
+            Edirs[0, t] = (np.arctan2(Edir[1], Edir[0]) * 180/np.pi)%360
+            Edirs[1, t] = (np.arccos(Edir[2]/LA.norm(Edir)) * 180/np.pi)%180
+            Sdir = self.env.R_eps.T@self.env.orb2geo((self.env.obs_lc_info[0:3]).T, 2*np.pi*t/circle_points)   ##########
+            Sdirs[0, t] = (np.arctan2(Sdir[1], Sdir[0]) * 180/np.pi)%360
+            Sdirs[1, t] = (np.arccos(Sdir[2]/LA.norm(Sdir)) * 180/np.pi)%180
 
         phi_ticks = self.__map_tick_list(resol, self.env.Nphi, 360)
         theta_ticks = self.__map_tick_list(resol, self.env.Ntheta, 180)
@@ -154,7 +166,8 @@ class Runner():
                     theta_action = (j/(resol*self.env.Ntheta))%1
                 actions = np.array([phi_action, theta_action, ratio_actions[0], ratio_actions[1]])
                 
-                _, reward, _, _ = self.env.step(actions, update=False)
+                obs, reward, _, _ = self.env.step(actions, update=False)
+                obs
                 delta_map_temp[i, j] = reward - ref_reward
                 self.data_set_arr = np.concatenate((self.data_set_arr, np.array([np.concatenate((self.state, actions, np.array([delta_map_temp[i, j]])))])), axis=0)
                 
@@ -184,23 +197,27 @@ class Runner():
             plt.close()
             """
 
-            """
-            plt.figure(figsize=(20, 11))
-            plt.imshow(delta_map_temp)
-            plt.plot(rot_axis[0]*resol*self.env.Nphi/360, rot_axis[1]*resol*self.env.Ntheta/180, color='red', marker='X', markersize=10)
-            plt.plot(((rot_axis[0]+180)%360)*resol*self.env.Nphi/360, (180-rot_axis[1])*resol*self.env.Ntheta/180, color='blue', marker='X', markersize=10)
-            plt.colorbar()
-            plt.quiver(X, Y, gradx, grady, color='gold', angles='xy', headwidth=2, headlength=4)
-            name = "Env No."+str(env_no)+" (ref_reward="+str(int(ref_reward*1000)/1000)+") Delta+Grad Reward MAP"
-            name_ratio = "(Ratio actions = ["+str(ratio_actions[0])+", "+str(ratio_actions[1])+"])"
-            name_rot_axis = "(Rot_Axis = ["+str(int(100*rot_axis[0])/100)+", "+str(int(100*rot_axis[1])/100)+"])"
-            plt.title(name+"\n"+name_ratio)
-            plt.xticks(phi_ticks[0], phi_ticks[1])
-            plt.yticks(theta_ticks[0], theta_ticks[1])
-            plt.savefig(path+name+name_ratio+".png", dpi=300)
-            plt.close()
-            """
-            
+            if save:
+                plt.figure(figsize=(20, 11))
+                plt.imshow(delta_map_temp)
+
+                plt.plot(rot_axis[0]*resol*self.env.Nphi/360, rot_axis[1]*resol*self.env.Ntheta/180, color='red', marker='X', markersize=10)
+                plt.plot(((rot_axis[0]+180)%360)*resol*self.env.Nphi/360, (180-rot_axis[1])*resol*self.env.Ntheta/180, color='blue', marker='X', markersize=10)
+                
+                for i in range(circle_points):
+                    plt.plot(Edirs[0, i]*resol*self.env.Nphi/360, Edirs[1, i]*resol*self.env.Ntheta/180, color='blue', marker='.', markersize=6)
+                    plt.plot(Sdirs[0, i]*resol*self.env.Nphi/360, Sdirs[1, i]*resol*self.env.Ntheta/180, color='red', marker='.', markersize=6)
+                
+                plt.colorbar()
+                plt.quiver(X, Y, gradx, grady, color='gold', angles='xy', headwidth=2, headlength=4)
+                name = "Env No."+str(env_no)+" (ref_reward="+str(int(ref_reward*1000)/1000)+") Delta+Grad Reward MAP"
+                name_ratio = "(Ratio actions = ["+str(ratio_actions[0])+", "+str(ratio_actions[1])+"])"
+                name_rot_axis = "(Rot_Axis = ["+str(int(100*rot_axis[0])/100)+", "+str(int(100*rot_axis[1])/100)+"])"
+                plt.title(name+"\n"+name_ratio)
+                plt.xticks(phi_ticks[0], phi_ticks[1])
+                plt.yticks(theta_ticks[0], theta_ticks[1])
+                plt.savefig(path+name+name_ratio+".png", dpi=300)
+                plt.close()            
 
     def __map_tick_list(self, resol:int, N_ang:int, max_ang):
         tick_num = 12
@@ -235,7 +252,8 @@ reward_arr = reward_arr[shuffle_idx]
 prec = 8
 reward_domain = [0, 50] #-20, 50
 
-start_idx = 510
+start_idx = 241 #여기부터 해야함함
+final_idx = 241
 total_data_set_defined = True
 if total_data_set_defined:
     total_data_set_arr = np.load("C:/Users/dlgkr/OneDrive/Desktop/code/astronomy/asteroid_AI/data/data_RL_preset_"+str(start_idx)+".npy")
@@ -244,6 +262,7 @@ for i in tqdm(range(X_total[start_idx:].shape[0])):
     if i%30 == 0 and i != 0:
         np.save("C:/Users/dlgkr/OneDrive/Desktop/code/astronomy/asteroid_AI/data/data_RL_preset_"+str(i+start_idx)+".npy",
                   total_data_set_arr)
+        final_idx = i + 0
         print(total_data_set_arr.shape)
 
     env = AstEnv(X_total[i, :-9*merge_num], X_total[i, -9*merge_num:], merge_num, reward_domain, N_set, lightcurve_unit_len, (True, ell_total[i, :]))
@@ -253,7 +272,8 @@ for i in tqdm(range(X_total[start_idx:].shape[0])):
     action_dim = 4
 
     runner = Runner(env, state_dim, action_dim)
-    runner.run(env_no=i, random=True)
+    #runner.run(env_no=i, random=True, save=False) #when generate data for training
+    runner.run(env_no=i, random=False, save=False)
 
     if not total_data_set_defined:
         total_data_set_arr = runner.data_set_arr
@@ -265,27 +285,31 @@ for i in tqdm(range(X_total[start_idx:].shape[0])):
     if i >= 600:
         break
 
-test_image_num = 1
+data_len = total_data_set_arr.shape[0]
+
+# generate test_images
+test_image_num = 5
 test_image_generated = 0
-test_image_gen_done = False
-for i in tqdm(range(X_total[:].shape[0])):
+for i in range(X_total[:].shape[0]):
     env = AstEnv(X_total[i, :-9*merge_num], X_total[i, -9*merge_num:], merge_num, reward_domain, N_set, lightcurve_unit_len, (True, ell_total[i, :]))
     if env.ell_err:# or env.reward0 >= 10:
         continue
-    test_image_generated += 1
-    if test_image_generated == test_image_num:
-        test_image_gen_done = True
     state_dim = (env.Ntheta//env.ast_obs_unit_step)*(env.Nphi//env.ast_obs_unit_step) + (lightcurve_unit_len//env.lc_obs_unit_step) + 9*5
     action_dim = 4
 
     runner = Runner(env, state_dim, action_dim)
-    runner.run(env_no=i, random=False)
+    runner.run(env_no=i, random=False, save=False)
 
     total_data_set_arr = np.concatenate((total_data_set_arr, runner.data_set_arr[1:]), axis=0)
     print(total_data_set_arr.shape)
-
-    if test_image_gen_done:
-        np.save("C:/Users/dlgkr/OneDrive/Desktop/code/astronomy/asteroid_AI/data/data_RL_preset_"+str(i+start_idx)+".npy",
-                  total_data_set_arr)
-        print(total_data_set_arr.shape)
+    test_image_generated += 1
+    if test_image_generated == test_image_num:
         break
+
+total_data_set_arr[0, 0] = data_len
+total_data_set_arr[0, 1] = total_data_set_arr.shape[0] - data_len
+
+np.save("C:/Users/dlgkr/OneDrive/Desktop/code/astronomy/asteroid_AI/data/data_RL_preset_"+str(final_idx)+".npy",
+            total_data_set_arr)
+print(total_data_set_arr.shape)
+
