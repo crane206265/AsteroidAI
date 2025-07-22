@@ -2,20 +2,11 @@ import numpy as np
 import numpy.linalg as LA
 
 import matplotlib.pyplot as plt
-from matplotlib import animation
-
-from scipy.special import sph_harm_y
-from scipy.special import factorial
 
 import random
-from itertools import combinations
-
-import torch
-from torch import nn, optim
-from torch.utils import data
-
-import os
 from tqdm import tqdm
+
+import gc
 
 
 PI = 3.1415926535
@@ -414,8 +405,8 @@ class AstEnv():
         self.obs_phi, self.obs_theta = self.obs_dir_cal()
         """
 
-        self.ast_obs_unit_step = 2 #2
-        self.lc_obs_unit_step = 2 #2
+        self.ast_obs_unit_step = 1 #2
+        self.lc_obs_unit_step = 1 #2
 
         self.Nphi, self.Ntheta = N_set[0], N_set[1]
         self.dphi, self.dtheta = 2*PI/self.Nphi, PI/self.Ntheta
@@ -502,7 +493,8 @@ class AstEnv():
         obs_lc = self.obs_lc_full[::self.lc_obs_unit_step] - self.lc_pred[self.obs_lc_num*self.lc_unit_len:(self.obs_lc_num+1)*self.lc_unit_len:self.lc_obs_unit_step]
         obs_lc_normalized = obs_lc*10/np.max(np.abs(obs_lc))
         obs_tensor = np.concatenate((obs_r_arr, obs_lc_normalized))
-        obs_tensor = np.concatenate((obs_tensor, np.repeat(10*self.obs_lc_info, 5)))
+        #obs_tensor = np.concatenate((obs_tensor, np.repeat(10*self.obs_lc_info, 5)))
+        obs_tensor = np.concatenate((obs_tensor, self.obs_lc_info[:6]))
         return obs_tensor
     
     def step(self, action, mode='ratio_assign', update=True):
@@ -1024,8 +1016,8 @@ print("X_total shape:", X_total.shape, "| ell_total shape:", ell_total.shape)
 prec = 8
 reward_domain = [-100, 50] #-20, 50
 
-start_idx = 120 #여기부터 해야함
-final_idx = 1000 #to be next start_idx
+start_idx = 996 #여기부터 해야함
+final_idx = 10000 #to be next start_idx
 total_data_set_defined = False
 if total_data_set_defined:
     total_data_set_arr = np.load("C:/Users/dlgkr/OneDrive/Desktop/code/astronomy/asteroid_AI/data/data_pole_axis_RL_preset_"+str(start_idx)+".npy")
@@ -1045,12 +1037,20 @@ for i in tqdm(range(X_total[start_idx:final_idx].shape[0])):
         final_idx = i + 0
         print(total_data_set_arr.shape)
 
-    env = AstEnv(X_total[i, :-9*merge_num], X_total[i, -9*merge_num:], merge_num, reward_domain, N_set, lightcurve_unit_len, (True, ell_total[i, :]))
+    if i%4 == 0 and i != 0 and total_data_set_defined:
+        passed_idx = np.array([], dtype=int)
+        reward0 = np.array([], dtype=float)
+        total_data_set_arr = None
+        total_data_set_defined = False
+        gc.collect()
+        print("-----Dataset Seperated-----")
+
+    env = AstEnv(X_total[i+start_idx, :-9*merge_num], X_total[i+start_idx, -9*merge_num:], merge_num, reward_domain, N_set, lightcurve_unit_len, (True, ell_total[i+start_idx, :]))
     if env.ell_err:# or env.reward0 >= 10:
         passed_idx = np.append(passed_idx, i+start_idx)
         reward0 = np.append(reward0, env.reward0)
         continue
-    state_dim = (env.Ntheta//env.ast_obs_unit_step)*(env.Nphi//env.ast_obs_unit_step) + (lightcurve_unit_len//env.lc_obs_unit_step) + 9*5
+    state_dim = (env.Ntheta//env.ast_obs_unit_step)*(env.Nphi//env.ast_obs_unit_step) + (lightcurve_unit_len//env.lc_obs_unit_step) + 6
     action_dim = 4
 
     runner = Runner(env, state_dim, action_dim)
