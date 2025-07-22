@@ -223,7 +223,7 @@ class SHEcoefDisplay():
         ax1 = fig.add_subplot(1, 2, 1, projection='3d')
         ax2 = fig.add_subplot(1, 2, 2, projection='3d')
         
-        lim_set = (-400, 400)
+        lim_set = (-10, 10)
         phi = np.linspace(0, 2*np.pi, self.SHE_divN[0])
         theta = np.linspace(0, np.pi, self.SHE_divN[1])
         phi, theta = np.meshgrid(phi, theta)
@@ -263,6 +263,77 @@ class SHEcoefDisplay():
         plt.show()
 
 
+
+class R_ArrDisplay():
+    def __init__(self, y0, pred, N_set):
+        self.y0 = np.array(y0)
+        self.pred = np.array(pred)
+        PI = 3.1415926535
+        self.Nphi, self.Ntheta = N_set[0], N_set[1]
+        self.dphi, self.dtheta = 2*PI/self.Nphi, PI/self.Ntheta
+        self.y0 = y0.reshape(self.Nphi, self.Ntheta)
+        self.pred = pred.reshape(self.Nphi, self.Ntheta)
+        self.coef_arr_display()
+
+    def coef_arr_display(self):
+        """
+        SHE display function for pred / y0 coef arr
+        """
+        fig = plt.figure(figsize=(10, 5))
+        ax1 = fig.add_subplot(1, 2, 1, projection='3d')
+        ax2 = fig.add_subplot(1, 2, 2, projection='3d')
+        
+        lim_set = (-2, 2)
+
+        y0_gridX = np.zeros((self.Nphi+1, self.Ntheta))
+        y0_gridY = np.zeros((self.Nphi+1, self.Ntheta))
+        y0_gridZ = np.zeros((self.Nphi+1, self.Ntheta))
+        pred_gridX = np.zeros((self.Nphi+1, self.Ntheta))
+        pred_gridY = np.zeros((self.Nphi+1, self.Ntheta))
+        pred_gridZ = np.zeros((self.Nphi+1, self.Ntheta))
+        for i in range(self.Nphi):
+            for j in range(self.Ntheta):
+                phi_ij = (j%2)*(self.dphi/2) + i*self.dphi
+                theta_ij = j*self.dtheta
+                pos_cart_temp = AsteroidModel.sph2cart((self.y0[i, j], phi_ij, theta_ij))
+                y0_gridX[i, j] = pos_cart_temp[0]
+                y0_gridY[i, j] = pos_cart_temp[1]
+                y0_gridZ[i, j] = pos_cart_temp[2]
+                pos_cart_temp = AsteroidModel.sph2cart((self.pred[i, j], phi_ij, theta_ij))
+                pred_gridX[i, j] = pos_cart_temp[0]
+                pred_gridY[i, j] = pos_cart_temp[1]
+                pred_gridZ[i, j] = pos_cart_temp[2]
+        y0_gridX[-1, :] = y0_gridX[0, :]
+        y0_gridY[-1, :] = y0_gridY[0, :]
+        y0_gridZ[-1, :] = y0_gridZ[0, :]
+        pred_gridX[-1, :] = pred_gridX[0, :]
+        pred_gridY[-1, :] = pred_gridY[0, :]
+        pred_gridZ[-1, :] = pred_gridZ[0, :]
+
+        ax1.set_box_aspect((1, 1, 1))
+        ax1.set_xlim(lim_set)
+        ax1.set_xlabel('X')
+        ax1.set_ylim(lim_set)
+        ax1.set_ylabel('Y')
+        ax1.set_zlim(lim_set)
+        ax1.set_zlabel('Z')
+        ax1.set_title("Correct Model - Spherical Hamonics Expansion")
+
+        ax1.plot_surface(y0_gridX, y0_gridY, y0_gridZ)
+        
+        ax2.set_box_aspect((1, 1, 1))
+        ax2.set_xlim(lim_set)
+        ax2.set_xlabel('X')
+        ax2.set_ylim(lim_set)
+        ax2.set_ylabel('Y')
+        ax2.set_zlim(lim_set)
+        ax2.set_zlabel('Z')
+        ax2.set_title("Predicted Model - Spherical Hamonics Expansion")
+
+        ax2.plot_surface(pred_gridX, pred_gridY, pred_gridZ)
+        
+        plt.show()
+
 """
 np.random.seed(1)
 test_ast = AsteroidModel(axes=(7, 4, 5), N_set=(40, 20), tilt_mode="random") #745
@@ -292,4 +363,4 @@ print(test_SHE.coef_arr)
 
 #plt.plot(test_lc.lc_arr)
 #plt.show()
-"""
+#"""
