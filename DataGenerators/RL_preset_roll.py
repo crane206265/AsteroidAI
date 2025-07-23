@@ -23,12 +23,17 @@ for i in tqdm(range(len(data_list))):
         data_temp = preset_temp[j*800+1, :]
         lc_max_idx = np.argmax(data_temp[800:900])
 
-        if lc_max_idx != 0 or True:
+        if lc_max_idx != 0:
             preset_temp[j*800+1:(j+1)*800+1, 800:900] = np.roll(preset_temp[j*800+1:(j+1)*800+1, 800:900], -lc_max_idx, axis=1)
             
             r_arr = preset_temp[j*800+1:(j+1)*800+1, :800].reshape(-1, 40, 20)
-            r_arr = np.roll(r_arr, -lc_max_idx, axis=1)
-            preset_temp[j*800+1:(j+1)*800+1, :800] = r_arr.reshape(-1, 800)    
+            r_arr = np.roll(r_arr, -round(lc_max_idx*40/100), axis=1)
+            preset_temp[j*800+1:(j+1)*800+1, :800] = r_arr.reshape(-1, 800)
+
+            preset_temp[j*800+1:(j+1)*800+1, -5] = (preset_temp[j*800+1:(j+1)*800+1, -5] - lc_max_idx/100)%1
+            action_reward_arr = preset_temp[j*800+1:(j+1)*800+1, -5:].reshape(-1, 40, 20, 5)
+            action_reward_arr = np.roll(action_reward_arr, -round(lc_max_idx*40/100), axis=1)
+            preset_temp[j*800+1:(j+1)*800+1, -5:] = action_reward_arr.reshape(-1, 5)
         
     save_file_name = save_path + "data_pole_axis_RL_preset_rolled_" + str(i) + ".npy"
     np.save(save_file_name, preset_temp)
