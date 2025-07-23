@@ -9,6 +9,7 @@ save_path = "C:/Users/dlgkr/OneDrive/Desktop/code/astronomy/asteroid_AI/data/pol
 
 file_list = os.listdir(folder_path)
 data_list = [f for f in file_list if f.__contains__('data_pole_axis_RL_preset_') and not f.__contains__('info')]
+data_list.sort(key=lambda x: int(x.split('_')[-1].split('.')[0]))
 
 
 # Roll the data by lc_max point
@@ -22,12 +23,12 @@ for i in tqdm(range(len(data_list))):
         data_temp = preset_temp[j*800+1, :]
         lc_max_idx = np.argmax(data_temp[800:900])
 
-        if lc_max_idx != 0:
+        if lc_max_idx != 0 or True:
             preset_temp[j*800+1:(j+1)*800+1, 800:900] = np.roll(preset_temp[j*800+1:(j+1)*800+1, 800:900], -lc_max_idx, axis=1)
-
+            
             r_arr = preset_temp[j*800+1:(j+1)*800+1, :800].reshape(-1, 40, 20)
             r_arr = np.roll(r_arr, -lc_max_idx, axis=1)
-            preset_temp[j*800+1:(j+1)*800+1, :800] = r_arr.reshape(-1, 800)
+            preset_temp[j*800+1:(j+1)*800+1, :800] = r_arr.reshape(-1, 800)    
         
     save_file_name = save_path + "data_pole_axis_RL_preset_rolled_" + str(i) + ".npy"
     np.save(save_file_name, preset_temp)
