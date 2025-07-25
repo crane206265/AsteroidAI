@@ -199,8 +199,8 @@ class EllipsoidModel():
                 temp2[i, j, 1] = temp2[i, j, 1] + 1
                 temp2 = temp2.clone()
 
-                self.surf_vec_arr = self.surf_vec_arr + temp1 * 0.5*torch.cross(v11, v12)
-                self.surf_vec_arr = self.surf_vec_arr + temp2 * 0.5*torch.cross(v21, v22)
+                self.surf_vec_arr = self.surf_vec_arr - temp1 * 0.5*torch.cross(v11, v12)
+                self.surf_vec_arr = self.surf_vec_arr - temp2 * 0.5*torch.cross(v21, v22)
 
 
 
