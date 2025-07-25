@@ -432,7 +432,7 @@ ax12.set_ylabel("flux")
 ax12.legend()
 
 print("-"*20)
-reward_total, loss_0, loss_i, loss_d = reward(lc_list[0], lc_arr0)
+reward_total, loss_0, loss_i, loss_d = reward(lc_arr0, lc_list[0])
 print("Total Reward : "+str(int(100*reward_total)/100))
 print("loss_0 : "+str(int(100*loss_0)/100))
 print("loss_i : "+str(int(100*loss_i)/100))
