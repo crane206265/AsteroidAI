@@ -189,7 +189,6 @@ class AsteroidModel():
                 self.surf_vec_arr[i, j, 0] = -0.5*np.cross(v11, v12)
                 self.surf_vec_arr[i, j, 1] = -0.5*np.cross(v21, v22)
 
-
 class LightCurve():
     def __init__(self, Asteroid : AsteroidModel, Keplerian_elem, eps, principle_axis=True):
         """
@@ -344,7 +343,6 @@ class LightCurve():
             w0, rot_angle = self.precession(w0, self.inertia_tensor, 0, rot_angle, dt, "No_Precession")
 
 
-
 def MSE_Roll_r_sim(target_img, ref_img):
     sims = np.zeros((40))
     for i in range(40):
@@ -358,12 +356,12 @@ def reward(pred, target):
     lc_temp = pred * np.mean(target) / np.mean(pred)
     target_lc_temp = target
     amp = np.max(target) - np.min(target)
-    loss = np.mean((80*(target_lc_temp - lc_temp)/amp)**2)  
+    loss0 = np.mean((80*(target_lc_temp - lc_temp)/amp)**2)  
     loss_i = 60*np.trapezoid(np.abs(target_lc_temp-lc_temp))/(100*amp)
     loss_d = np.mean((40*(np.diff(target_lc_temp)-np.diff(lc_temp)))**2)
     #loss = (loss + loss_i + loss_d)*3/10
-    loss = (1.2*loss + loss_i + loss_d)*2/10
-    return 100-loss, loss*1.2*2/10, loss_i*2/10, loss_d*2/10
+    loss = (1.2*loss0 + loss_i + loss_d)*2/10
+    return 100-loss, loss0*1.2*2/10, loss_i*2/10, loss_d*2/10
 
 
 np.random.seed(100)
