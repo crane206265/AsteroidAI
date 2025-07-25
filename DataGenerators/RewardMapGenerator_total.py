@@ -311,8 +311,8 @@ class AsteroidModel():
                     v12 = self.pos_cart_arr[i, j+1] - self.pos_cart_arr[i, j]
                     v21 = self.pos_cart_arr[i+1, j] - self.pos_cart_arr[i, j]
                     v22 = self.pos_cart_arr[i+1, j+1] - self.pos_cart_arr[i, j]
-                self.surf_vec_arr[i, j, 0] = 0.5*np.cross(v11, v12)
-                self.surf_vec_arr[i, j, 1] = 0.5*np.cross(v21, v22)
+                self.surf_vec_arr[i, j, 0] = -0.5*np.cross(v11, v12)
+                self.surf_vec_arr[i, j, 1] = -0.5*np.cross(v21, v22)
 
     def wobble_r(self, epoch = 1, ratio = 0.005):
         """
