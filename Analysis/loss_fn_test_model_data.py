@@ -1,9 +1,13 @@
 import numpy as np
 import matplotlib.pyplot as plt
+import cv2
 import torch
 from torch import nn
 from torchsummary import summary
+from tqdm import tqdm
 import gc
+import os
+
 
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -143,6 +147,85 @@ print("-"*20)
 sample_idx = [508, 620, 639, 466, 862, 970, 582, 789, 828, 309]
 test_img_idx = [2, 4, 5, 1, 8, 9, 3, 6, 7, 0]
 
+class RewardMapModifier():
+    def __init__(self, extends=(0, 1), blur_coef=(5, 3)):
+        self.extends = extends
+        self.blur_coef = blur_coef
+
+    def extend_hori(self, reward_map, action_maps):
+        left_reward = reward_map[..., :, -int(reward_map.shape[-2]*self.extends[1]/2):, :]
+        right_reward = reward_map[..., :, :int(reward_map.shape[-2]*self.extends[1]/2), :]
+
+        if action_maps is not None:
+            left_actions = action_maps[..., :, -int(action_maps.shape[-2]*self.extends[1]/2):, :].copy()
+            right_actions = action_maps[..., :, :int(action_maps.shape[-2]*self.extends[1]/2), :].copy()
+            left_actions[..., :, :, 0] = left_actions[..., :, :, 0] - 1
+            right_actions[..., :, :, 0] = right_actions[..., :, :, 0] + 1
+
+        if self.extends[1] != 0:
+            extended_reward = np.concatenate((left_reward, reward_map, right_reward), axis=-2)
+            extended_actions = np.concatenate((left_actions, action_maps, right_actions), axis=-2) if action_maps is not None else action_maps
+        else:
+            extended_reward = reward_map
+            extended_actions = action_maps
+
+        return extended_reward, extended_actions
+
+    def extend_vert(self, reward_map, action_maps):
+        top_reward = np.roll(reward_map[..., :int(reward_map.shape[-3]*self.extends[0]/2), :, :], 20, axis=-2)
+        bottom_reward = np.roll(reward_map[..., -int(reward_map.shape[-3]*self.extends[0]/2):, :, :], 20, axis=-2)
+        top_reward = np.flip(top_reward, axis=-3)
+        bottom_reward = np.flip(bottom_reward, axis=-3)
+
+        if action_maps is not None:
+            top_actions = np.flip(action_maps[..., :int(action_maps.shape[-3]*self.extends[0]/2), :, :].copy(), -3)
+            bottom_actions = np.flip(action_maps[..., -int(action_maps.shape[-3]*self.extends[0]/2):, :, :].copy(), -3)
+            top_actions[..., :, :, 1] = 2*0 - top_actions[..., :, :, 1]
+            bottom_actions[..., :, :, 1] = 2*1 - bottom_actions[..., :, :, 1]
+
+        if self.extends[0] != 0:
+            extended_reward = np.concatenate((top_reward, reward_map, bottom_reward), axis=-3)
+            extended_actions = np.concatenate((top_actions, action_maps, bottom_actions), axis=-3) if action_maps is not None else action_maps
+        else:
+            extended_reward = reward_map
+            extended_actions = action_maps
+
+        return extended_reward, extended_actions
+
+    def blur(self, reward_map):
+        #reward_map = 2.5 * np.tan( reward_map * (np.pi/2) / 6 )\n",
+        #reward_map = 6 * 2*(1/(1+np.exp(-reward_map/7)) - 0.5)
+        if len(reward_map.shape) == 3:
+            reward_map[:, :, 0] = cv2.GaussianBlur(reward_map[:, :, 0], (self.blur_coef[0], self.blur_coef[0]), self.blur_coef[1])
+        elif len(reward_map.shape) == 4:
+            for i in range(reward_map.shape[0]):
+                reward_map[i, :, :, 0] = cv2.GaussianBlur(reward_map[i, :, :, 0], (self.blur_coef[0], self.blur_coef[0]), self.blur_coef[1])
+                #max_val = np.max(np.abs(reward_map[i, :, :, 0]))
+                #reward_map[i, :, :, 0] = 6 * (2/np.pi) * np.arctan(reward_map[i, :, :, 0]/2) / ((2/np.pi) * np.arctan(max_val/2))
+        reward_map = 6 * (2/np.pi) * np.arctan(reward_map/8)
+        #reward_map = 6 * 2*(1/(1+np.exp(-reward_map/7)) - 0.5)
+        return reward_map
+
+    def operation(self, reward_map, action_maps, order=['extend_hori', 'extend_vert', 'blur']):
+        result_reward = reward_map
+        result_action = action_maps
+        for op in order:
+            if op == 'extend_hori':
+                result_reward, result_action = self.extend_hori(result_reward, result_action)
+            elif op == 'extend_vert':
+                result_reward, result_action = self.extend_vert(result_reward, result_action)
+            elif op == 'blur':
+                if self.blur_coef == (0, 0):
+                    reward_map = 6 * 2*(1/(1+np.exp(-reward_map/7)) - 0.5)
+                else:
+                    result_reward = self.blur(result_reward)
+            else:
+                raise NotImplementedError()
+        return result_reward, result_action
+
+    def ext_N_set(self, N_set):
+        return (N_set[0]+2*int(N_set[0]*self.extends[1]/2), N_set[1]+2*int(N_set[1]*self.extends[0]/2))
+
 # -------------------- Definitions of Funtions --------------------
 
 def input_data(state):
@@ -161,29 +244,39 @@ def input_data(state):
 def load_model(model_path):
     model = QValueNet_CNN(input_dim=910, hidden_dim=1024, activation=nn.ELU, dropout=0.15).to(device)
     #summary(model, (1, model.input_dim))
-    checkpoint = torch.load(model_path)
+    checkpoint = torch.load(model_path, map_location=device)
     model.load_state_dict(checkpoint['model_state_dict'])
     return model
 
+def loss_curve(reward_map, losses, test_img_idx):
+    fig = plt.figure(figsize=(9, 4))
+    ax1 = fig.add_subplot(1, 2, 1)
+    ax2 = fig.add_subplot(1, 2, 2)
+
+    im1 = ax1.imshow(reward_map, vmax=6, vmin=-6)
+    plt.colorbar(im1, ax=ax1, fraction=0.026, pad=0.04)
+    ax1.set_title("Test_img_idx : "+str(test_img_idx))
+
+    for i in range(losses.shape[1]): ax2.plot(losses[:, i], label="loss"+str(i))
+    plt.legend()
+    ax2.set_title("Loss Curves")
+
+    plt.show()
+
+def display_all(target_maps, pred_maps, losses):
+    dpi = 300
+    fig = plt.figure(figsize=(9, 4))
+    axes_total = []
+
+    for i in range(target_maps.shape[1]):
+        ax_list_temp = []
+        for j in range(target_maps.shape[0]+1+1):
+            ax_temp = fig.add_subplot(target_maps.shape[1], target_maps.shape[0]+1+1, i*(target_maps.shape[0]+1+1)+j+1)
+            ####Asdfasdf
+            ax_list_temp.append(ax_temp)
+        axes_total.append(ax_list_temp)
+
 # -------------------- Loss Functions --------------------
-
-# MSE Loss
-def loss0(pred, target): return np.mean((pred-target)**2)
-
-# Smoothed Propagation Loss
-def loss1(x, y):
-    # propagation of positive values
-    hori_prop, vert_prop = 1, 1
-    eps = 1
-    x_prop = processer(x, propagation=(hori_prop, vert_prop))
-    y_prop = processer(y, propagation=(hori_prop, vert_prop))
-
-    x_prop_pos = np.where(x_prop > 0, x_prop, 0)
-    x_prop_neg = np.where(x_prop < 0, x_prop, 0)
-    x_prop_final = x_prop_pos*np.max(y_prop)/(np.max(x_prop)+eps) + x_prop_neg*np.min(y_prop)/(np.min(x_prop)+eps)
-
-    loss = np.sqrt(np.mean((x_prop_final - y_prop) ** 2))
-    return loss
 
 def processer(reward_map, propagation=(3, 1)):
     hori_prop, vert_prop = propagation
@@ -204,21 +297,49 @@ def processer(reward_map, propagation=(3, 1)):
 
     return reward_map_prop
 
+# MSE Loss
+def loss0(pred, target): return np.mean((pred-target)**2)
+
+# Smoothed Propagation Loss
+def loss1(x, y):
+    # propagation of positive values
+    hori_prop, vert_prop = 1, 1
+    beta = 0.3
+    x_prop = processer(x, propagation=(hori_prop, vert_prop))
+    y_prop = processer(y, propagation=(hori_prop, vert_prop))
+
+    x_prop_pos = np.where(x_prop > 0, x_prop, 0)
+    x_prop_neg = np.where(x_prop < 0, x_prop, 0)
+    x_prop_final = x_prop_pos*np.max(y_prop)/(np.max(x_prop)+beta) + x_prop_neg*np.min(y_prop)/(np.min(x_prop)+beta)
+
+    loss = np.sqrt(np.mean((x_prop_final - y_prop) ** 2))
+    return loss
+
+
+
 # -------------------- Main Analysis --------------------
 
-model_paths = []
+PATH = "C:/Users/dlgkr/Downloads/train0815/"
+model_paths = os.listdir(PATH) #### sort 해야함
 loss_fns = [loss0, loss1]
 
-for model_path in model_paths:
-    model = load_model(model_path)
+modifier0 = RewardMapModifier((0, 0), (3, 2))
+
+losses = np.zeros((len(model_paths), len(test_img_idx), len(loss_fns)))
+pred_maps = np.zeros((len(model_paths), len(test_img_idx), 20, 40))
+target_maps = np.zeros((len(test_img_idx), 20, 40))
+for epoch_idx, model_path in tqdm(enumerate(model_paths)):
+    model = load_model(PATH+model_path)
     gc.collect()
 
-    losses = np.zeros((len(test_img_idx), len(loss_fns)))
     for num, i in zip(test_img_idx[:], sample_idx[:]):
         # num : test_img_idx
         # i : idx in data2
         state = data2[i*800, :906]
         target = data2[i*800:(i+1)*800, -1].reshape(40, 20).T
+        target, _ = modifier0.operation(np.expand_dims(target, axis=-1), None, order=['extend_vert', 'extend_hori', 'blur'])
+        target = target[:,:,0]
+        target_maps[num, :, :] = target.copy()
 
         pred = np.zeros((20, 40))
         model.eval()
@@ -227,9 +348,12 @@ for model_path in model_paths:
             rewards = model(input)
             pred = rewards.cpu().numpy().reshape(40, 20).T
         
+        pred_maps[epoch_idx, num, :, :] = pred.copy()
         for j, loss_fn in enumerate(loss_fns):
-            losses[num, j] = loss_fn(pred, target)
+            losses[epoch_idx, num, j] = loss_fn(pred, target)
 
+for num, i in zip(test_img_idx[:], sample_idx[:]):
+    loss_curve(data2[i*800:(i+1)*800, -1].reshape(40, 20).T, losses[:, num, :], num)
 
 
 
