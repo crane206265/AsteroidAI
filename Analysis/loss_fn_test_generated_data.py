@@ -171,25 +171,6 @@ def loss7(x, y):
 
     return loss
 
-def processer(reward_map, propagation=(3, 1)):
-    hori_prop, vert_prop = propagation
-    reward_map_pos = np.where(reward_map > 0, reward_map, 0)
-    reward_map_neg = np.where(reward_map < 0, reward_map, 0)
-
-    exp = 2
-    div = hori_prop + vert_prop - 0.5
-    reward_map_prop = reward_map_pos**exp
-    for i in range(1, hori_prop+1):
-        reward_map_prop[:, :-i] = reward_map_prop[:, :-i] + reward_map_pos[:, i:]**exp
-        reward_map_prop[:,  i:] = reward_map_prop[:,  i:] + reward_map_pos[:, :-i]**exp
-    for j in range(1, vert_prop+1):
-        reward_map_prop[:-j, :] = reward_map_prop[:-j, :] + reward_map_pos[j:, :]**exp
-        reward_map_prop[ j:, :] = reward_map_prop[ j:, :] + reward_map_pos[:-j, :]**exp
-    reward_map_prop = (reward_map_prop / div)**(1/exp)
-    reward_map_prop += reward_map_neg
-
-    return reward_map_prop
-
 def loss8(x, y):
     # propagation of positive values
     hori_prop = 1
