@@ -265,7 +265,7 @@ def loss_curve(reward_map, losses, test_img_idx):
 
 def display_all(target_maps, pred_maps, losses):
     dpi = 250
-    fig = plt.figure(figsize=(60, 40))
+    fig = plt.figure(figsize=(60, 50))
     axes_total = []
 
     for i in tqdm(range(pred_maps.shape[1])):
@@ -273,14 +273,14 @@ def display_all(target_maps, pred_maps, losses):
         for j in range(pred_maps.shape[0]+1+1):
             gc.collect()
             ax_temp = fig.add_subplot(target_maps.shape[1], target_maps.shape[0]+1+1, i*(target_maps.shape[0]+1+1)+j+1)
-            if j == 0:
+            if j == pred_maps.shape[0]:
                 img_temp = ax_temp.imshow(target_maps[i, :, :], vmax=6, vmin=-6)
                 plt.colorbar(img_temp, ax=ax_temp, fraction=0.026, pad=0.04)
                 ax_temp.set_title("Target Test Img "+str(i))
-            elif j >= 1 and j <= pred_maps.shape[0]:
-                img_temp = ax_temp.imshow(pred_maps[j-1, i, :, :], vmax=np.max(np.abs(pred_maps[j-1, i, :, :])), vmin=-np.max(np.abs(pred_maps[j-1, i, :, :])))
+            elif j >= 0 and j <= pred_maps.shape[0]-1:
+                img_temp = ax_temp.imshow(pred_maps[j, i, :, :], vmax=np.max(np.abs(pred_maps[j, i, :, :])), vmin=-np.max(np.abs(pred_maps[j-1, i, :, :])))
                 plt.colorbar(img_temp, ax=ax_temp, fraction=0.026, pad=0.04)
-                ax_temp.set_title("Predicted Test Img "+str(j*10+10))
+                ax_temp.set_title("Predicted Test Img "+str((j+1)*10+20))
             elif j == pred_maps.shape[0]+1:
                 for k in range(losses.shape[-1]):
                     ax_temp.plot(losses[:, i, k], label='loss'+str(k))
@@ -288,7 +288,8 @@ def display_all(target_maps, pred_maps, losses):
             ax_list_temp.append(ax_temp)
         axes_total.append(ax_list_temp)
     #plt.show()
-    plt.savefig("C:/Users/dlgkr/Downloads/display_all1.png", dpi=dpi)
+    plt.tight_layout()
+    plt.savefig("C:/Users/dlgkr/Downloads/display_all_3.png", dpi=dpi)
 # -------------------- Loss Functions --------------------
 
 def processer(reward_map, propagation=(3, 1)):
@@ -317,7 +318,7 @@ def loss0(pred, target): return np.mean((pred-target)**2)
 def loss1(x, y):
     # propagation of positive values
     hori_prop, vert_prop = 1, 1
-    beta = 0.3
+    beta = 0.15
     x_prop = processer(x, propagation=(hori_prop, vert_prop))
     y_prop = processer(y, propagation=(hori_prop, vert_prop))
 
@@ -335,7 +336,7 @@ def loss1(x, y):
 PATH = "C:/Users/dlgkr/Downloads/train0815/"
 model_paths = os.listdir(PATH)
 model_paths.sort(key=lambda x: int(x.removesuffix('model.pt')))
-model_paths = model_paths[1:]
+model_paths = model_paths[3:]
 loss_fns = [loss0, loss1]
 
 modifier0 = RewardMapModifier((0, 0), (3, 2))
@@ -351,10 +352,10 @@ for epoch_idx in tqdm(range(len(model_paths))):
         # num : test_img_idx
         # i : idx in data2
         state = data2[i*800, :906]
-        target = data2[i*800:(i+1)*800, -1].reshape(40, 20).T
-        target, _ = modifier0.operation(np.expand_dims(target, axis=-1), None, order=['extend_vert', 'extend_hori', 'blur'])
-        target = target[:,:,0]
-        target_maps[num, :, :] = target.copy()
+        target0 = data2[i*800:(i+1)*800, -1].reshape(40, 20).T
+        target, _ = modifier0.operation(np.expand_dims(target0, axis=-1), None, order=['extend_vert', 'extend_hori', 'blur'])
+        target = target[:, :, 0]
+        if epoch_idx == 0: target_maps[num, :, :] = target.copy()
 
         pred = np.zeros((20, 40))
         model.eval()
@@ -368,10 +369,11 @@ for epoch_idx in tqdm(range(len(model_paths))):
             losses[epoch_idx, num, j] = loss_fn(pred, target)
 
 for num, i in zip(test_img_idx[:], sample_idx[:]):
-    break
-    loss_curve(data2[i*800:(i+1)*800, -1].reshape(40, 20).T, losses[:, num, :], num)
+    #plt.imshow(target_maps[num, :, :], vmax=6, vmin=-6)
+    #plt.show()
+    loss_curve(target_maps[num, :, :], losses[:, num, :], num)
 
-display_all(target_maps, pred_maps, losses)
+#display_all(target_maps, pred_maps, losses)
 
     
         
