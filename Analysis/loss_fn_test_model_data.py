@@ -264,18 +264,31 @@ def loss_curve(reward_map, losses, test_img_idx):
     plt.show()
 
 def display_all(target_maps, pred_maps, losses):
-    dpi = 300
-    fig = plt.figure(figsize=(9, 4))
+    dpi = 250
+    fig = plt.figure(figsize=(60, 40))
     axes_total = []
 
-    for i in range(target_maps.shape[1]):
+    for i in tqdm(range(pred_maps.shape[1])):
         ax_list_temp = []
-        for j in range(target_maps.shape[0]+1+1):
+        for j in range(pred_maps.shape[0]+1+1):
+            gc.collect()
             ax_temp = fig.add_subplot(target_maps.shape[1], target_maps.shape[0]+1+1, i*(target_maps.shape[0]+1+1)+j+1)
-            ####Asdfasdf
+            if j == 0:
+                img_temp = ax_temp.imshow(target_maps[i, :, :], vmax=6, vmin=-6)
+                plt.colorbar(img_temp, ax=ax_temp, fraction=0.026, pad=0.04)
+                ax_temp.set_title("Target Test Img "+str(i))
+            elif j >= 1 and j <= pred_maps.shape[0]:
+                img_temp = ax_temp.imshow(pred_maps[j-1, i, :, :], vmax=np.max(np.abs(pred_maps[j-1, i, :, :])), vmin=-np.max(np.abs(pred_maps[j-1, i, :, :])))
+                plt.colorbar(img_temp, ax=ax_temp, fraction=0.026, pad=0.04)
+                ax_temp.set_title("Predicted Test Img "+str(j*10+10))
+            elif j == pred_maps.shape[0]+1:
+                for k in range(losses.shape[-1]):
+                    ax_temp.plot(losses[:, i, k], label='loss'+str(k))
+                plt.legend()
             ax_list_temp.append(ax_temp)
         axes_total.append(ax_list_temp)
-
+    #plt.show()
+    plt.savefig("C:/Users/dlgkr/Downloads/display_all1.png", dpi=dpi)
 # -------------------- Loss Functions --------------------
 
 def processer(reward_map, propagation=(3, 1)):
@@ -320,7 +333,9 @@ def loss1(x, y):
 # -------------------- Main Analysis --------------------
 
 PATH = "C:/Users/dlgkr/Downloads/train0815/"
-model_paths = os.listdir(PATH) #### sort 해야함
+model_paths = os.listdir(PATH)
+model_paths.sort(key=lambda x: int(x.removesuffix('model.pt')))
+model_paths = model_paths[1:]
 loss_fns = [loss0, loss1]
 
 modifier0 = RewardMapModifier((0, 0), (3, 2))
@@ -328,8 +343,8 @@ modifier0 = RewardMapModifier((0, 0), (3, 2))
 losses = np.zeros((len(model_paths), len(test_img_idx), len(loss_fns)))
 pred_maps = np.zeros((len(model_paths), len(test_img_idx), 20, 40))
 target_maps = np.zeros((len(test_img_idx), 20, 40))
-for epoch_idx, model_path in tqdm(enumerate(model_paths)):
-    model = load_model(PATH+model_path)
+for epoch_idx in tqdm(range(len(model_paths))):
+    model = load_model(PATH+model_paths[epoch_idx])
     gc.collect()
 
     for num, i in zip(test_img_idx[:], sample_idx[:]):
@@ -353,9 +368,10 @@ for epoch_idx, model_path in tqdm(enumerate(model_paths)):
             losses[epoch_idx, num, j] = loss_fn(pred, target)
 
 for num, i in zip(test_img_idx[:], sample_idx[:]):
+    break
     loss_curve(data2[i*800:(i+1)*800, -1].reshape(40, 20).T, losses[:, num, :], num)
 
-
+display_all(target_maps, pred_maps, losses)
 
     
         
