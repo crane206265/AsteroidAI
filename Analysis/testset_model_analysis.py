@@ -420,21 +420,66 @@ def plotter1(r_arr, lc_arr, lc_info, reward_map0, reward_map, loss, roll_loss, i
     ax1.set_title("Lightcurve at idx " + str(idx))
 
     fft_coef_zip = np.abs(np.fft.fft(lc_arr))[:lc_arr.shape[0]//2+1]
-    lim = (np.min(np.log10(fft_coef_zip))-0.3, np.max(np.log10(fft_coef_zip))+0.3)
-    ax2.plot(np.log10(fft_coef_zip))
+    fft_coef_zip = np.log10(fft_coef_zip)
+    log_thr = np.log10(4)#0.6
+    global filtered_num, total_num, filtered_percents
+    if not np.all(fft_coef_zip[2] - log_thr >= fft_coef_zip[3:]):
+        print("Filtered Percent {:.2f}%".format(100*filtered_num/total_num))
+        filtered_percents.append(100*filtered_num/total_num)
+        plt.close()
+        return
+    filtered_num += 1
+    lim = (np.min(fft_coef_zip)-0.3, np.max(fft_coef_zip)+0.3)
+
+    ax2.plot(fft_coef_zip)
     ax2.plot([np.argmax(fft_coef_zip), np.argmax(fft_coef_zip)], [lim[0], lim[1]], linestyle='dotted')
     ax2.set_title("FFT of LC at idx " + str(idx))
     ax2.set_ylim(lim[0], lim[1])
 
+    r_arr_img = ax4.imshow(r_arr, vmax=8, vmin=12)
+    ax4.set_title("R_arr at idx " + str(idx))
+    plt.colorbar(r_arr_img, ax=ax4, shrink=0.75)
+    ax4.plot([0, 39], [Stheta, Stheta], color='orangered', label='Sun Direction', linewidth=2, linestyle='dashed')
+    ax4.plot([0, 39], [Etheta, Etheta], color='royalblue', label='Earth Direction', linewidth=2, linestyle='dashed')
+    ax4.legend()
+
+    reward_map0_img = ax5.imshow(reward_map0, vmax=np.max(np.abs(reward_map0)), vmin=-np.max(np.abs(reward_map0)))#, vmax=6, vmin=-6)
+    ax5.set_title("Reward_Map at idx " + str(idx) + "(loss="+str(int(loss*1000)/1000)+")")
+    plt.colorbar(reward_map0_img, ax=ax5, shrink=0.75)
+    ax5.plot([0, 40*(modifier0.extends[1]+1)-1], [Etheta*(modifier0.extends[0]+1), Etheta*(modifier0.extends[0]+1)], color='royalblue', label='Earth Direction', linewidth=2, linestyle='dashed')
+    ax5.plot([0, 40*(modifier0.extends[1]+1)-1], [Stheta*(modifier0.extends[0]+1), Stheta*(modifier0.extends[0]+1)], color='orangered', label='Sun Direction', linewidth=2, linestyle='dashed')
+    ax5.plot([20*modifier0.extends[1], 20*modifier0.extends[1]+40], [10*modifier0.extends[0], 10*modifier0.extends[0]], color='gold', linewidth=0.8, linestyle='dotted')
+    ax5.plot([20*modifier0.extends[1], 20*modifier0.extends[1]+40], [10*modifier0.extends[0]+20, 10*modifier0.extends[0]+20], color='gold', linewidth=0.8, linestyle='dotted')
+    ax5.plot([20*modifier0.extends[1], 20*modifier0.extends[1]], [10*modifier0.extends[0], 10*modifier0.extends[0]+20], color='gold', linewidth=0.8, linestyle='dotted')
+    ax5.plot([20*modifier0.extends[1]+40, 20*modifier0.extends[1]+40], [10*modifier0.extends[0], 10*modifier0.extends[0]+20], color='gold', linewidth=0.8, linestyle='dotted')
+    ax5.set_xlim([0-0.5, 40-0.5])
+    ax5.set_ylim([20-0.5, 0-0.5])
+
+    reward_map_img = ax6.imshow(reward_map, vmax=np.max(np.abs(reward_map)), vmin=-np.max(np.abs(reward_map)))#, vmax=6, vmin=-6)
+    ax6.set_title("Reward_Map at idx " + str(idx) + "(loss="+str(int(loss*1000)/1000)+")")
+    plt.colorbar(reward_map_img, ax=ax6, shrink=0.75)
+    ax6.plot([0, 40*(modifier0.extends[1]+1)-1], [Etheta*(modifier0.extends[0]+1), Etheta*(modifier0.extends[0]+1)], color='royalblue', label='Earth Direction', linewidth=2, linestyle='dashed')
+    ax6.plot([0, 40*(modifier0.extends[1]+1)-1], [Stheta*(modifier0.extends[0]+1), Stheta*(modifier0.extends[0]+1)], color='orangered', label='Sun Direction', linewidth=2, linestyle='dashed')
+    ax6.plot([20*modifier0.extends[1], 20*modifier0.extends[1]+40], [10*modifier0.extends[0], 10*modifier0.extends[0]], color='gold', linewidth=0.8, linestyle='dotted')
+    ax6.plot([20*modifier0.extends[1], 20*modifier0.extends[1]+40], [10*modifier0.extends[0]+20, 10*modifier0.extends[0]+20], color='gold', linewidth=0.8, linestyle='dotted')
+    ax6.plot([20*modifier0.extends[1], 20*modifier0.extends[1]], [10*modifier0.extends[0], 10*modifier0.extends[0]+20], color='gold', linewidth=0.8, linestyle='dotted')
+    ax6.plot([20*modifier0.extends[1]+40, 20*modifier0.extends[1]+40], [10*modifier0.extends[0], 10*modifier0.extends[0]+20], color='gold', linewidth=0.8, linestyle='dotted')
+    ax6.set_xlim([0-0.5, 40-0.5])
+    ax6.set_ylim([20-0.5, 0-0.5])
+
     plt.tight_layout()
-    plt.show()
+    #plt.show()
+    plt.savefig("./analysis/testset_model_analysis_imgs/img{:03d}.png".format(idx))
+    plt.close()
+    print("Filtered Percent {:.2f}%".format(100*filtered_num/total_num))
+    filtered_percents.append(100*filtered_num/total_num)
 
 # -------------------- Main Analysis --------------------
 
 model_path = "C:/Users/dlgkr/Downloads/train0831_2/120model.pt"
 
 #np.random.seed(206265)
-sample_idx = list(np.random.randint(0, data2.shape[0]//800, 20))
+sample_idx = list(np.random.randint(0, data2.shape[0]//800, 200))
 print("sample idx : [", end='')
 for idx in sample_idx:
     print(idx, end=' ')
@@ -449,6 +494,10 @@ target_maps = np.zeros((len(test_img_idx), 20, 40))
 
 model = load_model(model_path)
 gc.collect()
+
+filtered_num = 0
+total_num = 0
+filtered_percents = []
 
 for num, i in zip(test_img_idx[:], sample_idx[:]):
     # num : test_img_idx
@@ -474,17 +523,24 @@ for num, i in zip(test_img_idx[:], sample_idx[:]):
         for k in range(40):
             roll_loss[j, k] = loss_fn(np.roll(pred, (j, k), axis=(0, 1)), target)
 
+    total_num += 1
     #plotter0(state[:800].reshape(40, 20).T, state[800:900], state[900:906], target_maps[num, :, :], pred_maps[num, :, :], losses[num], roll_loss, i)
     plotter1(state[:800].reshape(40, 20).T, state[800:900], state[900:906], target_maps[num, :, :], pred_maps[num, :, :], losses[num], roll_loss, i)
 
 
 
 
-
+"""
 reward0_path = "c:/Users/dlgkr/OneDrive/Desktop/code/astronomy/asteroid_AI/data/pole_axis_RL_data_batches/data_pole_axis_RL_preset_reward0.npy"
 passed_idx_path = "c:/Users/dlgkr/OneDrive/Desktop/code/astronomy/asteroid_AI/data/pole_axis_RL_data_batches/data_pole_axis_RL_preset_passed_idx.npy"
 reward0 = np.load(reward0_path)
 passed_idx = np.load(passed_idx_path)
 print(reward0)
 print(passed_idx)
-print(data2.shape[0]//800)        
+print(data2.shape[0]//800)  
+"""
+plt.plot(filtered_percents)
+plt.plot([0-10, len(filtered_percents)+10], [filtered_percents[-1], filtered_percents[-1]], color='lightgray', linestyle='-.')
+plt.ylabel("%")
+plt.ylim([15, 40])
+plt.show()      
