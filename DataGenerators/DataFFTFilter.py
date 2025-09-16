@@ -4,7 +4,7 @@ import gc
 import os
 
 
-# -------------------- Test Data Loading --------------------
+# -------------------- Data Loading --------------------
 
 data0 = np.load("C:/Users/dlgkr/OneDrive/Desktop/code/astronomy/asteroid_AI/data/pole_axis_RL_data_batches/data_pole_axis_RL_preset_batch_0.npy")#[1:]
 data1 = np.load("C:/Users/dlgkr/OneDrive/Desktop/code/astronomy/asteroid_AI/data/pole_axis_RL_data_batches/data_pole_axis_RL_preset_batch_1.npy")#[1:]
@@ -29,7 +29,7 @@ for data in [data0, data1, data2]:
         log_thr = np.log10(4)#4
         if np.all(fft_coef_zip[2] - log_thr >= fft_coef_zip[3:]):
             filtered_data_temp = np.concatenate((filtered_data_temp, data[i*800:(i+1)*800, :]), axis=0)
-    filtered_data_temp[0, :] = data[0, :]
+    filtered_data_temp[0, 0] = filtered_data_temp.shape[0]
     filtered_data_list.append(filtered_data_temp)
     print("Filtered Dataset Shape : "+str(filtered_data_temp.shape))
 
