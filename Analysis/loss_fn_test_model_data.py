@@ -147,6 +147,7 @@ print("-"*20)
 sample_idx = [508, 620, 639, 466, 862, 970, 582, 789, 828, 309]
 test_img_idx = [2, 4, 5, 1, 8, 9, 3, 6, 7, 0]
 
+
 class RewardMapModifier():
     def __init__(self, extends=(0, 1), blur_coef=(5, 3)):
         self.extends = extends
@@ -263,6 +264,26 @@ def loss_curve(reward_map, losses, test_img_idx):
 
     plt.show()
 
+def loss_curve2(reward_map0, reward_map, losses, test_img_idx):
+    fig = plt.figure(figsize=(13, 4))
+    ax1 = fig.add_subplot(1, 3, 1)
+    ax2 = fig.add_subplot(1, 3, 2)
+    ax3 = fig.add_subplot(1, 3, 3)
+
+    im1 = ax1.imshow(reward_map0, vmax=6, vmin=-6)
+    plt.colorbar(im1, ax=ax1, fraction=0.026, pad=0.04)
+    ax1.set_title("Map0 Test_img_idx : "+str(test_img_idx))
+
+    im2 = ax2.imshow(reward_map, vmax=np.max(np.abs(reward_map)), vmin=-np.max(np.abs(reward_map)))
+    plt.colorbar(im2, ax=ax2, fraction=0.026, pad=0.04)
+    ax1.set_title("Map Test_img_idx : "+str(test_img_idx))
+
+    for i in range(losses.shape[1]): ax3.plot(losses[:, i], label="loss"+str(i))
+    plt.legend()
+    ax3.set_title("Loss Curves")
+
+    plt.show()
+
 def display_all(target_maps, pred_maps, losses):
     dpi = 250
     fig = plt.figure(figsize=(60, 50))
@@ -289,7 +310,7 @@ def display_all(target_maps, pred_maps, losses):
         axes_total.append(ax_list_temp)
     #plt.show()
     plt.tight_layout()
-    plt.savefig("C:/Users/dlgkr/Downloads/display_all_3.png", dpi=dpi)
+    plt.savefig("C:/Users/dlgkr/Downloads/display_all_2.png", dpi=dpi)
 # -------------------- Loss Functions --------------------
 
 def processer(reward_map, propagation=(3, 1)):
@@ -297,7 +318,7 @@ def processer(reward_map, propagation=(3, 1)):
     reward_map_pos = np.where(reward_map > 0, reward_map, 0)
     reward_map_neg = np.where(reward_map < 0, reward_map, 0)
 
-    exp = 2
+    exp = 2.5
     div = hori_prop + vert_prop - 0.5
     reward_map_prop = reward_map_pos**exp
     for i in range(1, hori_prop+1):
@@ -318,7 +339,7 @@ def loss0(pred, target): return np.mean((pred-target)**2)
 def loss1(x, y):
     # propagation of positive values
     hori_prop, vert_prop = 1, 1
-    beta = 0.15
+    beta = 0.3
     x_prop = processer(x, propagation=(hori_prop, vert_prop))
     y_prop = processer(y, propagation=(hori_prop, vert_prop))
 
@@ -329,6 +350,22 @@ def loss1(x, y):
     loss = np.sqrt(np.mean((x_prop_final - y_prop) ** 2))
     return loss
 
+# ?
+def loss2(x, y):
+    # propagation of positive values
+    hori_prop, vert_prop = 1, 1
+    beta = 0.3
+    x_prop = processer(x, propagation=(hori_prop, vert_prop))
+    y_prop = processer(y, propagation=(hori_prop, vert_prop))
+
+    x_prop_pos = np.where(x_prop > 0, x_prop, 0)
+    x_prop_neg = np.where(x_prop < 0, x_prop, 0)
+    x_prop_final = x_prop_pos*np.max(y_prop)/(np.max(x_prop)+beta) + x_prop_neg*np.min(y_prop)/(np.min(x_prop)+beta)
+    weight = 1 + np.abs(y_prop)/2.5
+
+    loss = np.sqrt(np.average((x_prop_final - y_prop) ** 2, weights=weight))
+    return loss
+
 
 
 # -------------------- Main Analysis --------------------
@@ -337,7 +374,17 @@ PATH = "C:/Users/dlgkr/Downloads/train0815/"
 model_paths = os.listdir(PATH)
 model_paths.sort(key=lambda x: int(x.removesuffix('model.pt')))
 model_paths = model_paths[3:]
-loss_fns = [loss0, loss1]
+loss_fns = [loss0, loss1, loss2]
+
+
+np.random.seed(206265)
+sample_idx = list(np.random.randint(0, data2.shape[0]//800, 50))
+print("sample idx : [", end='')
+for idx in sample_idx:
+    print(idx, end=' ')
+print("]")
+test_img_idx = list(range(len(sample_idx)))
+
 
 modifier0 = RewardMapModifier((0, 0), (3, 2))
 
@@ -368,10 +415,20 @@ for epoch_idx in tqdm(range(len(model_paths))):
         for j, loss_fn in enumerate(loss_fns):
             losses[epoch_idx, num, j] = loss_fn(pred, target)
 
+"""
 for num, i in zip(test_img_idx[:], sample_idx[:]):
-    #plt.imshow(target_maps[num, :, :], vmax=6, vmin=-6)
-    #plt.show()
+    pass
     loss_curve(target_maps[num, :, :], losses[:, num, :], num)
+"""
+
+for num, i in zip(test_img_idx[:], sample_idx[:]):
+    lc_arr = data2[i*800, 800:900]
+    fft_coef_zip = np.abs(np.fft.fft(lc_arr))[:lc_arr.shape[0]//2+1]
+    fft_coef_zip = np.log10(fft_coef_zip+1e-8)
+    log_thr = np.log10(4)#4
+    if np.all(fft_coef_zip[2] - log_thr >= fft_coef_zip[3:]):
+        #loss_curve(target_maps[num, :, :], losses[:, num, :], num)
+        loss_curve2(target_maps[num, :, :], pred_maps[-1, num, :, :], losses[:, num, :], num)
 
 #display_all(target_maps, pred_maps, losses)
 
