@@ -311,8 +311,8 @@ class AsteroidModel():
                     v12 = self.pos_cart_arr[i, j+1] - self.pos_cart_arr[i, j]
                     v21 = self.pos_cart_arr[i+1, j] - self.pos_cart_arr[i, j]
                     v22 = self.pos_cart_arr[i+1, j+1] - self.pos_cart_arr[i, j]
-                self.surf_vec_arr[i, j, 0] = -0.5*np.cross(v11, v12)
-                self.surf_vec_arr[i, j, 1] = -0.5*np.cross(v21, v22)
+                self.surf_vec_arr[i, j, 0] = 0.5*np.cross(v11, v12)
+                self.surf_vec_arr[i, j, 1] = 0.5*np.cross(v21, v22)
 
     def wobble_r(self, epoch = 1, ratio = 0.005):
         """
@@ -1016,8 +1016,19 @@ print("X_total shape:", X_total.shape, "| ell_total shape:", ell_total.shape)
 prec = 8
 reward_domain = [-100, 50] #-20, 50
 
-start_idx = 996 #여기부터 해야함
-final_idx = 10000 #to be next start_idx
+##### start_idx 997부터 filter 적용시켰음 (25.09.18)
+def lc_filter(lc_arr, threshold=4):
+    fft_coef_zip = np.abs(np.fft.fft(lc_arr))[:lc_arr.shape[0]//2+1]
+    fft_coef_zip = np.log10(fft_coef_zip+1e-8)
+    log_thr = np.log10(threshold)
+    return np.all(fft_coef_zip[2] - log_thr >= fft_coef_zip[3:])
+
+save_path = "C:/Users/dlgkr/OneDrive/Desktop/code/astronomy/asteroid_AI/data/"
+lc_filtering = True
+if lc_filtering: save_path = save_path + "RL_preset_filtered/"
+
+start_idx = 997 #여기부터 해야함
+final_idx = 2000 #to be next start_idx
 total_data_set_defined = False
 if total_data_set_defined:
     total_data_set_arr = np.load("C:/Users/dlgkr/OneDrive/Desktop/code/astronomy/asteroid_AI/data/data_pole_axis_RL_preset_"+str(start_idx)+".npy")
@@ -1028,11 +1039,18 @@ if total_data_set_defined:
 passed_idx = np.array([], dtype=int)
 reward0 = np.array([], dtype=float)
 
-for i in tqdm(range(X_total[start_idx:final_idx].shape[0])):
+X_total_new = X_total[start_idx:final_idx].copy()
+ell_total_new = ell_total[start_idx:final_idx].copy()
+del X_total, ell_total
+X_total = X_total_new
+ell_total = ell_total_new
+gc.collect()
+
+for i in tqdm(range(X_total.shape[0])):
     if i%4 == 0 and i != 0 and total_data_set_defined:
-        np.save("C:/Users/dlgkr/OneDrive/Desktop/code/astronomy/asteroid_AI/data/data_pole_axis_RL_preset_"+str(i+start_idx)+".npy",
+        np.save(save_path + "data_pole_axis_RL_preset_"+str(i+start_idx)+".npy",
                   total_data_set_arr)
-        np.savez("C:/Users/dlgkr/OneDrive/Desktop/code/astronomy/asteroid_AI/data/data_pole_axis_RL_preset_info"+str(i+start_idx)+".npz",
+        np.savez(save_path + "data_pole_axis_RL_preset_info"+str(i+start_idx)+".npz",
                 passed_idx=passed_idx, reward0=reward0)
         final_idx = i + 0
         print(total_data_set_arr.shape)
@@ -1045,8 +1063,9 @@ for i in tqdm(range(X_total[start_idx:final_idx].shape[0])):
         gc.collect()
         print("-----Dataset Seperated-----")
 
-    env = AstEnv(X_total[i+start_idx, :-9*merge_num], X_total[i+start_idx, -9*merge_num:], merge_num, reward_domain, N_set, lightcurve_unit_len, (True, ell_total[i+start_idx, :]))
-    if env.ell_err:# or env.reward0 >= 10:
+    #env = AstEnv(X_total[i+start_idx, :-9*merge_num], X_total[i+start_idx, -9*merge_num:], merge_num, reward_domain, N_set, lightcurve_unit_len, (True, ell_total[i+start_idx, :]))
+    env = AstEnv(X_total[i, :-9*merge_num], X_total[i, -9*merge_num:], merge_num, reward_domain, N_set, lightcurve_unit_len, (True, ell_total[i, :]))
+    if env.ell_err or (lc_filtering and not lc_filter(X_total[i, :-9*merge_num])):
         passed_idx = np.append(passed_idx, i+start_idx)
         reward0 = np.append(reward0, env.reward0)
         continue
@@ -1088,6 +1107,6 @@ for i in range(X_total[:].shape[0]):
 total_data_set_arr[0, 0] = data_len
 total_data_set_arr[0, 1] = total_data_set_arr.shape[0] - data_len
 
-np.save("C:/Users/dlgkr/OneDrive/Desktop/code/astronomy/asteroid_AI/data/data_pole_axis_RL_preset_"+str(final_idx)+".npy",
+np.save(save_path + "data_pole_axis_RL_preset_"+str(final_idx)+".npy",
             total_data_set_arr)
 print(total_data_set_arr.shape)
