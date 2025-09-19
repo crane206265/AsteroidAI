@@ -6,21 +6,22 @@ import os
 
 # -------------------- Data Loading --------------------
 
-data0 = np.load("C:/Users/dlgkr/OneDrive/Desktop/code/astronomy/asteroid_AI/data/pole_axis_RL_data_batches/data_pole_axis_RL_preset_batch_0.npy")#[1:]
-data1 = np.load("C:/Users/dlgkr/OneDrive/Desktop/code/astronomy/asteroid_AI/data/pole_axis_RL_data_batches/data_pole_axis_RL_preset_batch_1.npy")#[1:]
-data2 = np.load("C:/Users/dlgkr/OneDrive/Desktop/code/astronomy/asteroid_AI/data/pole_axis_RL_data_batches/data_pole_axis_RL_preset_batch_2.npy")#[1:]
+batch_num = 5
+data_list = []
+data_path_default = "C:/Users/dlgkr/OneDrive/Desktop/code/astronomy/asteroid_AI/data/pole_axis_RL_data_batches/data_pole_axis_RL_preset_batch_"
+for i in range(batch_num):
+    data_list.append(np.load(data_path_default+str(i)+".npy"))
 
 print("[Data shapes]")
-print("data0 shape : ", data0.shape)
-print("data1 shape : ", data1.shape)
-print("data2 shape : ", data2.shape)
+for data in data_list:
+    print("Data Size :"+str(data.shape))
 print("-"*20)
 
 # -------------------- Main --------------------
 
 filtered_data_list = []
 
-for data in [data0, data1, data2]:
+for data in data_list:
     filtered_data_temp = np.zeros((1, data.shape[1]))
     for i in tqdm(range((data.shape[0]-1)//800)):
         lc_arr = data[i*800, 800:900]
@@ -33,9 +34,5 @@ for data in [data0, data1, data2]:
     filtered_data_list.append(filtered_data_temp)
     print("Filtered Dataset Shape : "+str(filtered_data_temp.shape))
 
-np.save("C:/Users/dlgkr/OneDrive/Desktop/code/astronomy/asteroid_AI/data/pole_axis_RL_data_batches/data_pole_axis_RL_preset_batch_filtered_0.npy"
-        , filtered_data_list[0])
-np.save("C:/Users/dlgkr/OneDrive/Desktop/code/astronomy/asteroid_AI/data/pole_axis_RL_data_batches/data_pole_axis_RL_preset_batch_filtered_1.npy"
-        , filtered_data_list[1])
-np.save("C:/Users/dlgkr/OneDrive/Desktop/code/astronomy/asteroid_AI/data/pole_axis_RL_data_batches/data_pole_axis_RL_preset_batch_filtered_2.npy"
-        , filtered_data_list[2])
+for i, data in enumerate(filtered_data_list):
+    np.save("C:/Users/dlgkr/OneDrive/Desktop/code/astronomy/asteroid_AI/data/pole_axis_RL_data_batches/data_pole_axis_RL_preset_batch_filtered_"+str(i)+".npy", data)
