@@ -7,6 +7,8 @@ import gc
 folder_path = "C:/Users/dlgkr/OneDrive/Desktop/code/astronomy/asteroid_AI/data/"
 save_path = "C:/Users/dlgkr/OneDrive/Desktop/code/astronomy/asteroid_AI/data/pole_axis_RL_preset_rolled/"
 
+start_idx = 115
+
 file_list = os.listdir(folder_path)
 data_list = [f for f in file_list if f.__contains__('data_pole_axis_RL_preset_') and not f.__contains__('info')]
 data_list.sort(key=lambda x: int(x.split('_')[-1].split('.')[0]))
@@ -35,6 +37,6 @@ for i in tqdm(range(len(data_list))):
             action_reward_arr = np.roll(action_reward_arr, -round(lc_max_idx*40/100), axis=1)
             preset_temp[j*800+1:(j+1)*800+1, -5:] = action_reward_arr.reshape(-1, 5)
         
-    save_file_name = save_path + "data_pole_axis_RL_preset_rolled_" + str(i) + ".npy"
+    save_file_name = save_path + "data_pole_axis_RL_preset_rolled_" + str(i+start_idx) + ".npy"
     np.save(save_file_name, preset_temp)
     
