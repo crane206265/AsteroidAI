@@ -1025,9 +1025,8 @@ def lc_filter(lc_arr, threshold=4):
 
 save_path = "C:/Users/dlgkr/OneDrive/Desktop/code/astronomy/asteroid_AI/data/"
 lc_filtering = True
-if lc_filtering: save_path = save_path + "RL_preset_filtered/"
 
-start_idx = 997 #여기부터 해야함
+start_idx = 1218#997 #여기부터 해야함
 final_idx = 2000 #to be next start_idx
 total_data_set_defined = False
 if total_data_set_defined:
