@@ -310,16 +310,16 @@ def display_all(target_maps, pred_maps, losses):
         axes_total.append(ax_list_temp)
     #plt.show()
     plt.tight_layout()
-    plt.savefig("C:/Users/dlgkr/Downloads/display_all_2.png", dpi=dpi)
+    plt.savefig("C:/Users/dlgkr/Downloads/display_all_0922_1.png", dpi=dpi)
 # -------------------- Loss Functions --------------------
 
-def processer(reward_map, propagation=(3, 1)):
+def processer(reward_map, propagation=(3, 1), param=(None, None)):
     hori_prop, vert_prop = propagation
     reward_map_pos = np.where(reward_map > 0, reward_map, 0)
     reward_map_neg = np.where(reward_map < 0, reward_map, 0)
 
-    exp = 2.5
-    div = hori_prop + vert_prop - 0.5
+    exp = 2.5 if param[0] is None else param[1]
+    div = hori_prop + vert_prop - 0.5 if param[1] is None else hori_prop + vert_prop - param[1]
     reward_map_prop = reward_map_pos**exp
     for i in range(1, hori_prop+1):
         reward_map_prop[:, :-i] = reward_map_prop[:, :-i] + reward_map_pos[:, i:]**exp
@@ -353,7 +353,7 @@ def loss1(x, y):
 # ?
 def loss2(x, y):
     # propagation of positive values
-    hori_prop, vert_prop = 1, 1
+    hori_prop, vert_prop = 3, 3
     beta = 0.3
     x_prop = processer(x, propagation=(hori_prop, vert_prop))
     y_prop = processer(y, propagation=(hori_prop, vert_prop))
@@ -366,6 +366,23 @@ def loss2(x, y):
     loss = np.sqrt(np.average((x_prop_final - y_prop) ** 2, weights=weight))
     return loss
 
+def loss3(x, y):
+    # propagation of positive values
+    hori_prop, vert_prop = 1, 1
+    beta = 0.3
+
+    x = 3*(2/np.pi)*np.arctan(x/1.5)
+    y = 3*(2/np.pi)*np.arctan(y/1.5)
+    x_prop = processer(x, propagation=(hori_prop, vert_prop), param=(1.8, 0.5))
+    y_prop = processer(y, propagation=(hori_prop, vert_prop), param=(1.8, 0.5))
+
+    x_prop_pos = np.where(x_prop > 0, x_prop, 0)
+    x_prop_neg = np.where(x_prop < 0, x_prop, 0)
+    x_prop_final = x_prop_pos*np.max(y_prop)/(np.max(x_prop)+beta) + x_prop_neg*np.min(y_prop)/(np.min(x_prop)+beta)
+    weight = 1 + np.abs(y_prop)/2.5
+
+    loss = np.sqrt(np.average((x_prop_final - y_prop) ** 2, weights=weight))
+    return loss/3
 
 
 # -------------------- Main Analysis --------------------
@@ -374,11 +391,11 @@ PATH = "C:/Users/dlgkr/Downloads/train0815/"
 model_paths = os.listdir(PATH)
 model_paths.sort(key=lambda x: int(x.removesuffix('model.pt')))
 model_paths = model_paths[3:]
-loss_fns = [loss0, loss1, loss2]
+loss_fns = [loss0, loss1, loss2, loss3]
 
 
-np.random.seed(206265)
-sample_idx = list(np.random.randint(0, data2.shape[0]//800, 50))
+#np.random.seed(206265)
+sample_idx = list(np.random.randint(0, data2.shape[0]//800, 15))
 print("sample idx : [", end='')
 for idx in sample_idx:
     print(idx, end=' ')
@@ -430,7 +447,7 @@ for num, i in zip(test_img_idx[:], sample_idx[:]):
         #loss_curve(target_maps[num, :, :], losses[:, num, :], num)
         loss_curve2(target_maps[num, :, :], pred_maps[-1, num, :, :], losses[:, num, :], num)
 
-#display_all(target_maps, pred_maps, losses)
+display_all(target_maps, pred_maps, losses)
 
     
         
