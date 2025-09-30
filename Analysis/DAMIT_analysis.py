@@ -88,17 +88,28 @@ with tarfile.open(file_path, 'r:gz') as tar:
         plt.hist(asts_idx_list, bins=len(lc_txts))
         plt.title("# of lc.txt Files for each Asteroids")
         plt.show()
+    
+    idx = 3
+    t_arr_list, intensity_arr_list, period = data_extract(tar, lc_txts[idx], spin_txts[idx])
 
-    t_arr_list, intensity_arr_list, period = data_extract(tar, lc_txts[0], spin_txts[0])
-
-    for t_arr, intensity_arr in zip(t_arr_list, intensity_arr_list):
+    for lc_idx, (t_arr, intensity_arr) in enumerate(zip(t_arr_list, intensity_arr_list)):
+        print("-"*20)
         print("Period : %.5f (hour) / %.5f (days)"%(period*24, period))
         print("Time Range : [%.5f, %.5f] --> dt = %.5f (%.5f P)"%(t_arr[0], t_arr[-1], t_arr[-1]-t_arr[0], (t_arr[-1]-t_arr[0])/period))
+        print(" ")
+        
         plt.plot(t_arr, intensity_arr, marker='.', color='royalblue', linestyle='none')
         ylims = plt.ylim()
         plt.plot([t_arr[0]]*2, ylims, linestyle='dotted', color='orangered', alpha=0.7)
         plt.plot([t_arr[0]+period]*2, ylims, linestyle='dotted', color='orangered', alpha=0.7)
-        plt.show()
+        
+        title = lc_txts[idx].split('/')[2].replace('asteroid', 'Asteroid') + "_%02dth LC"%(lc_idx)
+        save_path = "C:/Users/dlgkr/OneDrive/Desktop/code/astronomy/asteroid_AI/DAMIT_analysis/"
+
+        plt.title(title)
+        #plt.show()
+        plt.savefig(save_path + title + ".png")
+        plt.close()
 
 
     
